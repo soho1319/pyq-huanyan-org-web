@@ -322,7 +322,7 @@ export async function onRequestPost(context: {
  prompt,
  env.MINIMAX_API_KEY,
  env.MINIMAX_BASE_URL || "https://api.minimax.chat/v1",
- env.MINIMAX_MODEL || "MiniMax-M1",
+ env.MINIMAX_MODEL || "MiniMax-M3",
  "MiniMax"
  );
  } else if (env.ANTHROPIC_API_KEY) {
