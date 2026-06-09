@@ -16,8 +16,8 @@ pages_build_output_dir = "./vendor/quartz/public"
 # - SITE_NAME = 内容营销朋友圈小助手
 # - FREE_TIER_DAILY_LIMIT =50
 #4. Environment variables (Secret):
-# - ANTHROPIC_API_KEY = sk-ant-xxx
-# - OPENAI_API_KEY = sk-xxx
+# - MINIMAX_API_KEY = your_minimax_api_key
+# 可选备用：ANTHROPIC_API_KEY / OPENAI_API_KEY
 #5. Save and Deploy
 
 #build.sh做了什么：
@@ -26,3 +26,9 @@ pages_build_output_dir = "./vendor/quartz/public"
 #3. 把仓库根的 quartz.config.ts / components / functions复制到 Quartz
 #4.装 npm依赖 +跑 npx quartz build
 #5.产物输出到 vendor/quartz/public/ ← CF Pages读这个目录
+[vars]
+SITE_URL = "https://pyq.huanyan.org"
+SITE_NAME = "内容营销朋友圈小助手"
+FREE_TIER_DAILY_LIMIT = "50"
+MINIMAX_BASE_URL = "https://api.minimax.chat/v1"
+MINIMAX_MODEL = "MiniMax-M1"

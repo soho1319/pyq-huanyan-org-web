@@ -50,7 +50,7 @@ const config: QuartzConfig = {
  },
  },
  baseUrl: "pyq.huanyan.org",
- ignorePatterns: ["private", "templates", ".obsidian"],
+ ignorePatterns: ["private", "templates", ".obsidian", "课程原文"],
  },
 
  plugins: {
