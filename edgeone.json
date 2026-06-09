@@ -1,0 +1,67 @@
+{
+ "name": "pyq-huanyan-org",
+ "description": "内容营销朋友圈小助手 · 国内站（EdgeOne Pages）",
+ "framework": "quartz",
+ "buildCommand": "cd vendor/quartz && npm install && npm run build",
+ "outputDirectory": "vendor/quartz/public",
+ "version": "1.0.0",
+
+ "env": {
+ "SITE_URL": "https://pyq-cn.huanyan.org",
+ "SITE_NAME": "内容营销朋友圈小助手",
+ "FREE_TIER_DAILY_LIMIT": "50",
+ "MINIMAX_BASE_URL": "https://api.minimax.chat/v1",
+ "MINIMAX_MODEL": "M3",
+ "DEEPSEEK_BASE_URL": "https://api.deepseek.com/v1",
+ "DEEPSEEK_MODEL": "deepseek-chat",
+ "KIMI_BASE_URL": "https://api.moonshot.cn/v1",
+ "KIMI_MODEL": "moonshot-v1-8k"
+ },
+
+ "secrets": [
+ {
+ "name": "MINIMAX_API_KEY",
+ "description": "minimax M3 API key（国内站主推）",
+ "required": true
+ },
+ {
+ "name": "DEEPSEEK_API_KEY",
+ "description": "DeepSeek API key（备选）",
+ "required": false
+ },
+ {
+ "name": "KIMI_API_KEY",
+ "description": "Kimi API key（备选）",
+ "required": false
+ },
+ {
+ "name": "OPENAI_API_KEY",
+ "description": "OpenAI API key（备选，需翻墙）",
+ "required": false
+ }
+ ],
+
+ "edgeFunctions": [
+ {
+ "path": "/api/generate",
+ "file": "edge-functions/generate.ts"
+ }
+ ],
+
+ "domains": [
+ "pyq-cn.huanyan.org"
+ ],
+
+ "redirects": [],
+
+ "headers": [
+ {
+ "source": "/(.*)",
+ "headers": [
+ { "key": "X-Content-Type-Options", "value": "nosniff" },
+ { "key": "X-Frame-Options", "value": "DENY" },
+ { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+ ]
+ }
+ ]
+}

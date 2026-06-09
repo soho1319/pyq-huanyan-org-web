@@ -1,0 +1,50 @@
+# ============================================
+# pyq-huanyan-org-web .gitignore
+# ============================================
+
+# 环境变量（绝对不能提交）
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+.pnpm-debug.log
+
+# Quartz vendor
+vendor/quartz/.quartz-cache/
+vendor/quartz/public/
+vendor/quartz/private/
+
+# EdgeOne
+.edgeone/
+
+# Wrangler
+.wrangler/
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 日志
+*.log
+logs/
+
+#临时文件
+*.tmp
+*.bak
+*.bak.*
+
+#敏感配置
+*.pem
+*.key
+secrets/

@@ -1,0 +1,42 @@
+# ============================================
+# Cloudflare Pages · 国际站部署配置
+# ============================================
+name = "pyq-huanyan-org"
+compatibility_date = "2024-06-20"
+pages_build_output_dir = "./vendor/quartz/public"
+
+# ============================================
+# 构建配置
+# ============================================
+[build]
+command = "npm run build"
+cwd = "."
+
+# ============================================
+# 环境变量（在 CF Dashboard → Settings → Environment variables 配置）
+# 这里只列非敏感的公开变量
+# ============================================
+[vars]
+SITE_URL = "https://pyq.huanyan.org"
+SITE_NAME = "内容营销朋友圈小助手"
+FREE_TIER_DAILY_LIMIT = "50"
+
+#敏感变量（API keys）用 secrets 命令配：
+# wrangler pages secret put ANTHROPIC_API_KEY --project-name=pyq-huanyan-org
+# wrangler pages secret put OPENAI_API_KEY --project-name=pyq-huanyan-org
+
+# ============================================
+# KV namespace（限流用）
+# 在 CF Dashboard → Workers & Pages → KV → 创建 namespace：rate_limit
+# 然后在 Pages → Settings → Functions → KV namespace bindings 加：
+# Variable name: RATE_LIMIT
+# KV namespace: rate_limit
+# ============================================
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT"
+# id = "<your-kv-namespace-id>"
+
+# ============================================
+# 自定义域名（在 Dashboard 配置即可，不需要在 toml 里）
+# pyq.huanyan.org → pyq-huanyan-org.pages.dev
+# ============================================

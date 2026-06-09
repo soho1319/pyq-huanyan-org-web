@@ -1,0 +1,21 @@
+{
+ "name": "pyq-huanyan-org-web",
+ "version": "1.0.0",
+ "description": "内容营销朋友圈小助手 · pyq.huanyan.org · 双站部署（CF Pages + EdgeOne Pages）",
+ "private": true,
+ "scripts": {
+ "setup": "node scripts/setup.js",
+ "dev": "cd vendor/quartz && npx quartz build --serve",
+ "build": "cd vendor/quartz && npx quartz build",
+ "deploy:cf": "wrangler pages deploy vendor/quartz/public --project-name pyq-huanyan-org",
+ "deploy:edgeone": "cd vendor/quartz && edgeone deploy"
+ },
+ "devDependencies": {
+ "@cloudflare/workers-types": "^4.20240620.0",
+ "typescript": "^5.5.4",
+ "wrangler": "^3.65.0"
+ },
+ "dependencies": {
+ "edgeone": "^1.0.0"
+ }
+}
