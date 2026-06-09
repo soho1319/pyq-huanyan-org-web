@@ -4,6 +4,7 @@ import PromptToolbox from "./components/PromptToolbox"
 export const sharedPageComponents = {
   head: Component.Head(),
   header: [],
+  afterBody: [],
   footer: Component.Footer({
     links: {},
   }),
@@ -17,7 +18,6 @@ export const defaultContentPageLayout = {
     Component.TagList(),
     PromptToolbox(),
   ],
-  pageBody: Component.Content(),
   left: [
     Component.PageTitle(),
     Component.MobileOnly(Component.Spacer()),
@@ -35,7 +35,6 @@ export const defaultContentPageLayout = {
 
 export const defaultListPageLayout = {
   beforeBody: [Component.Breadcrumbs(), Component.ArticleTitle(), Component.ContentMeta()],
-  pageBody: Component.Content(),
   left: [
     Component.PageTitle(),
     Component.MobileOnly(Component.Spacer()),
