@@ -29,7 +29,7 @@ if [ -d "$QUARTZ_DIR" ]; then
  echo "vendor/quartz 已存在，先删除"
  rm -rf "$QUARTZ_DIR"
 fi
-git clone --depth 1 https://github.com/jackyzha0/quartz.git "$QUARTZ_DIR"
+git clone --depth 1 --branch v4 https://github.com/jackyzha0/quartz.git "$QUARTZ_DIR"
 
 #2.复制配置
 echo ""
