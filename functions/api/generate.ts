@@ -23,6 +23,9 @@ interface Env {
  OPENAI_API_KEY?: string;
  ANTHROPIC_MODEL?: string;
  OPENAI_MODEL?: string;
+ MINIMAX_API_KEY?: string;
+ MINIMAX_BASE_URL?: string;
+ MINIMAX_MODEL?: string;
  FREE_TIER_DAILY_LIMIT?: string;
  RATE_LIMIT?: KVNamespace; // CF KV，存每日调用次数
  SITE_URL?: string;
@@ -192,6 +195,75 @@ async function callOpenAI(
  });
  }
 
+
+// ============================================
+// 调 OpenAI 兼容协议 API（MiniMax 等）
+// ============================================
+async function callOpenAICompatible(
+ prompt: string,
+ apiKey: string,
+ baseUrl: string,
+ model: string,
+ modelName: string
+): Promise<ReadableStream> {
+ const resp = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+ method: "POST",
+ headers: {
+ Authorization: `Bearer ${apiKey}`,
+ "Content-Type": "application/json",
+ },
+ body: JSON.stringify({
+ model,
+ max_tokens:2048,
+ stream: true,
+ messages: [
+ { role: "system", content: "你是婉音老师课程体系下的内容营销专家，擅长写朋友圈文案、内容营销、用户故事。" },
+ { role: "user", content: prompt },
+ ],
+ }),
+ });
+
+ if (!resp.ok) {
+ const errText = await resp.text();
+ throw new Error(`${modelName} API ${resp.status}: ${errText.slice(0,200)}`);
+ }
+
+ if (!resp.body) throw new Error(`${modelName} API无响应`);
+
+ const reader = resp.body.getReader();
+ const decoder = new TextDecoder();
+
+ return new ReadableStream({
+ async start(controller) {
+ let buffer = "";
+ try {
+ while (true) {
+ const { done, value } = await reader.read();
+ if (done) break;
+ buffer += decoder.decode(value, { stream: true });
+ const lines = buffer.split("\n");
+ buffer = lines.pop() || "";
+ for (const line of lines) {
+ if (line.startsWith("data: ")) {
+ const data = line.slice(6).trim();
+ if (data === "[DONE]") break;
+ try {
+ const json = JSON.parse(data);
+ const text = json.choices?.[0]?.delta?.content;
+ if (text) controller.enqueue(new TextEncoder().encode(text));
+ } catch {}
+ }
+ }
+ }
+ } catch (err) {
+ controller.error(err);
+ } finally {
+ controller.close();
+ }
+ },
+ });
+}
+
 // ============================================
 // 主入口
 // ============================================
@@ -244,7 +316,16 @@ export async function onRequestPost(context: {
  let stream: ReadableStream;
  let modelUsed = "claude";
 
- if (env.ANTHROPIC_API_KEY) {
+ if (env.MINIMAX_API_KEY) {
+ modelUsed = "minimax";
+ stream = await callOpenAICompatible(
+ prompt,
+ env.MINIMAX_API_KEY,
+ env.MINIMAX_BASE_URL || "https://api.minimax.chat/v1",
+ env.MINIMAX_MODEL || "MiniMax-M1",
+ "MiniMax"
+ );
+ } else if (env.ANTHROPIC_API_KEY) {
  stream = await callClaude(
  prompt,
  env.ANTHROPIC_API_KEY,
