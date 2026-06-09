@@ -1,19 +1,44 @@
-import { FullSlug, getAllSliugs } from "./quartz/util/path"
-import { Layout } from "./quartz/util/layout"
-import { FilePath, JOIN } from "./quartz/util/path"
-import { QuartzComponent } from "./quartz/components/types"
-import { GlobalDrawer } from "./quartz/components"
+import * as Component from "./quartz/components"
 import PromptToolbox from "./components/PromptToolbox"
 
-export default (() => {
- const head: QuartzComponent = PromptToolbox() //注入工具箱脚本
+export const sharedPageComponents = {
+  head: Component.Head(),
+  header: [],
+  footer: Component.Footer({
+    links: {},
+  }),
+}
 
- return {
- head,
- header: [],
- beforeBody: [],
- pageBody: [],
- afterBody: [],
- footer: [],
- }
-}) satisfies Layout
+export const defaultContentPageLayout = {
+  beforeBody: [
+    Component.Breadcrumbs(),
+    Component.ArticleTitle(),
+    Component.ContentMeta(),
+    Component.TagList(),
+    PromptToolbox(),
+  ],
+  left: [
+    Component.PageTitle(),
+    Component.MobileOnly(Component.Spacer()),
+    Component.Search(),
+    Component.Darkmode(),
+    Component.DesktopOnly(Component.Explorer()),
+  ],
+  right: [
+    Component.Graph(),
+    Component.DesktopOnly(Component.TableOfContents()),
+    Component.Backlinks(),
+  ],
+}
+
+export const defaultListPageLayout = {
+  beforeBody: [Component.Breadcrumbs(), Component.ArticleTitle(), Component.ContentMeta()],
+  left: [
+    Component.PageTitle(),
+    Component.MobileOnly(Component.Spacer()),
+    Component.Search(),
+    Component.Darkmode(),
+    Component.DesktopOnly(Component.Explorer()),
+  ],
+  right: [],
+}

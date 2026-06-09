@@ -76,29 +76,15 @@ const config: QuartzConfig = {
  emitters: [
  Plugin.AliasRedirects(),
  Plugin.ComponentResources(),
- Plugin.ContentPage({
- head: Plugin.HeadConfig({
- enableSiteMap: true,
- rssFileSlug: "index",
- rssLimit:20,
- rssFullHtml: false,
- }),
- }),
+ Plugin.ContentPage(),
  Plugin.FolderPage(),
  Plugin.TagPage(),
  Plugin.ContentIndex({
- indexOptions: {
- title: "内容营销朋友圈小助手",
- // 显示首页 + 全站所有笔记
- allOptions: {
- title: "全部笔记",
- },
- },
+ enableSiteMap: true,
+ enableRSS: true,
  }),
- Plugin.RSS({ filename: "index" }),
- Plugin.StaticResources({
- enableResourceCompression: true,
- }),
+ Plugin.Assets(),
+ Plugin.Static(),
  Plugin.NotFoundPage(),
  ],
  },
