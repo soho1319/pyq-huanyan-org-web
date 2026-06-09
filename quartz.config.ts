@@ -101,6 +101,7 @@ const config: QuartzConfig = {
  }),
  Plugin.NotFoundPage(),
  ],
+ },
 }
 
 export default config
