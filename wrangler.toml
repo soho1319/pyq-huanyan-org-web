@@ -17,6 +17,7 @@ pages_build_output_dir = "./vendor/quartz/public"
 # - FREE_TIER_DAILY_LIMIT =50
 #4. Environment variables (Secret):
 # - MINIMAX_API_KEY = your_minimax_api_key
+# - BASIC_AUTH_PASSWORD = your_site_password
 # 可选备用：ANTHROPIC_API_KEY / OPENAI_API_KEY
 #5. Save and Deploy
 
@@ -27,6 +28,7 @@ pages_build_output_dir = "./vendor/quartz/public"
 #4.装 npm依赖 +跑 npx quartz build
 #5.产物输出到 vendor/quartz/public/ ← CF Pages读这个目录
 [vars]
+BASIC_AUTH_USER = "admin"
 SITE_URL = "https://pyq.huanyan.org"
 SITE_NAME = "内容营销朋友圈小助手"
 FREE_TIER_DAILY_LIMIT = "50"
