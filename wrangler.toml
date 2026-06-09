@@ -8,8 +8,21 @@ pages_build_output_dir = "./vendor/quartz/public"
 
 #部署流程：
 #1. CF Dashboard → Pages → Connect to Git → soho1319/pyq-huanyan-org-web
-#2. Build command: cd vendor/quartz && npm install && npx quartz build
-#3. Build output directory: vendor/quartz/public
-#4. Environment variables (Plaintext): SITE_URL, SITE_NAME, FREE_TIER_DAILY_LIMIT
-#5. Environment variables (Secret): ANTHROPIC_API_KEY, OPENAI_API_KEY
-#6. Save and Deploy
+#2. Build settings:
+# Build command: bash build.sh
+# Build output directory: vendor/quartz/public
+#3. Environment variables (Plaintext):
+# - SITE_URL = https://pyq.huanyan.org
+# - SITE_NAME = 内容营销朋友圈小助手
+# - FREE_TIER_DAILY_LIMIT =50
+#4. Environment variables (Secret):
+# - ANTHROPIC_API_KEY = sk-ant-xxx
+# - OPENAI_API_KEY = sk-xxx
+#5. Save and Deploy
+
+#build.sh做了什么：
+#1.临时 clone Quartz v4 → vendor/quartz/
+#2. 把仓库根的 content/复制到 vendor/quartz/content/
+#3. 把仓库根的 quartz.config.ts / components / functions复制到 Quartz
+#4.装 npm依赖 +跑 npx quartz build
+#5.产物输出到 vendor/quartz/public/ ← CF Pages读这个目录

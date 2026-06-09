@@ -13,10 +13,12 @@ npm-debug.log
 yarn-error.log
 .pnpm-debug.log
 
-# Quartz vendor
-vendor/quartz/.quartz-cache/
-vendor/quartz/public/
-vendor/quartz/private/
+# Quartz vendor（build 时自动 clone，**不 commit**）
+vendor/
+
+# build产物
+public/
+dist/
 
 # EdgeOne
 .edgeone/
@@ -48,3 +50,7 @@ logs/
 *.pem
 *.key
 secrets/
+
+# Obsidian vault内部文件（不要把 .obsidian提交）
+.obsidian/
+.trash/
