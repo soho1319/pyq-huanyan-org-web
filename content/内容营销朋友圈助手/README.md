@@ -1,7 +1,7 @@
 ---
-title:README · 内容营销朋友圈小助手
+title: README · 内容营销朋友圈小助手
 tags: [内容营销/朋友圈/README]
-created:2026-06-09
+created: 2026-06-09
 ---
 
 # 📖README · 内容营销朋友圈小助手

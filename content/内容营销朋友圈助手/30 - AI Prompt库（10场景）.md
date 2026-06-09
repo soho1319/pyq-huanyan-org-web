@@ -1,7 +1,7 @@
 ---
-title:AI Prompt库（10场景）
+title: AI Prompt库（10场景）
 tags: [内容营销/朋友圈/AI/Prompt]
-created:2026-06-09
+created: 2026-06-09
 ---
 
 # 🤖 AI Prompt库（10 个高频场景）
