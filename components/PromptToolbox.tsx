@@ -102,12 +102,12 @@ const initToolbox = `
  const output = box.querySelector('.pt-output');
 
  //收集变量值
- const filledPrompt = promptText;
+ let filledPrompt = promptText;
  const inputs = box.querySelectorAll('.pt-input');
  inputs.forEach(input => {
  const name = input.dataset.varName;
  const value = input.value || '（未填写）';
- filledPrompt.replace('【' + name + '】', value);
+ filledPrompt = filledPrompt.split('【' + name + '】').join(value);
  });
 
  // 显示 loading
