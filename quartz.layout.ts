@@ -1,9 +1,10 @@
 import * as Component from "./quartz/components"
 import PromptToolbox from "./components/PromptToolbox"
+import UserBar from "./components/UserBar"
 
 export const sharedPageComponents = {
   head: Component.Head(),
-  header: [],
+  header: [UserBar()],
   afterBody: [],
   footer: Component.Footer({
     links: {},

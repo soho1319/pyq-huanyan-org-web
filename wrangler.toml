@@ -18,7 +18,10 @@ pages_build_output_dir = "./vendor/quartz/public"
 #4. Environment variables (Secret):
 # - MINIMAX_API_KEY = your_minimax_api_key
 # - BASIC_AUTH_PASSWORD = your_site_password
+# - SESSION_SECRET = 随机字符串（可选；不设就用 BASIC_AUTH_PASSWORD 当 HMAC key）
 # 可选备用：ANTHROPIC_API_KEY / OPENAI_API_KEY
+# 登录入口：https://pyq.huanyan.org/login
+# 登出入口：https://pyq.huanyan.org/logout（顶部右上角"退出"按钮）
 #5. Save and Deploy
 
 #build.sh做了什么：
