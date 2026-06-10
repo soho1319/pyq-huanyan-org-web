@@ -1,8 +1,8 @@
-# Cloudflare Pages · pyq-huanyan-org（国际站）
+# Cloudflare Pages · pyq-huanyan-org-web（国际站）
 # CF Pages 不支持 wrangler.toml里的 [build] section
 # Build 配置必须在 CF Dashboard UI 上设置
 
-name = "pyq-huanyan-org"
+name = "pyq-huanyan-org-web"
 compatibility_date = "2024-06-20"
 pages_build_output_dir = "./vendor/quartz/public"
 
