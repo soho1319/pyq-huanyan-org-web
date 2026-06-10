@@ -1,0 +1,19 @@
+# ============================================
+# pyq.huanyan.org · Worker 反代配置
+#
+# 部署：
+#   cd worker
+#   npx wrangler deploy
+# ============================================
+name = "pyq-huanyan-reverse"
+main = "src/index.js"
+compatibility_date = "2024-06-20"
+
+# 路由：所有到 pyq.huanyan.org/* 的请求都过这个 Worker
+# zone_name 必须是当前 wrangler 账号能管理的 zone
+routes = [
+  { pattern = "pyq.huanyan.org/*", zone_name = "huanyan.org" }
+]
+
+# 可选：自定义域名（一般用不到，CF 自动从路由推断）
+# workers_dev = false
