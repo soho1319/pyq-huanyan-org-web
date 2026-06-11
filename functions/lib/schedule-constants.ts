@@ -490,3 +490,20 @@ export async function loadEnabledSlots(
     return ["morning"]
   }
 }
+
+// D55-12 兼容：D54 的 TYPE_SUBTHEMES/pickSubtheme 在 D55 切换 dim 时被删，
+// 但 today.ts line 578/618 还在用。加 stub 让 /today 跑得通（返回 null 时 UI 不显示 subtheme 标签）
+export function pickSubtheme(_key: string, _date: string): { id: string; label: string } | null {
+  return null
+}
+
+// D55-12 兼容：D55 删了 DIMENSION_TYPE_MAP（旧 type→旧 type[] 映射），但 today.ts line 177/682 还在用。
+// 返回 dim→dim 自身映射，UI 渲染空块（不影响 /today 200）
+export const DIMENSION_TYPE_MAP: Record<string, string[]> = {
+  A: ["A"], B: ["B"], C: ["C"], D: ["D"], E: ["E"], F: ["F"], G: ["G"],
+}
+
+// D55-12 兼容：D55 删了 reverseDimensionMap，但 today.ts line 177 dynamic import 解构里还在用
+export function reverseDimensionMap(_postType: string): string[] {
+  return []
+}

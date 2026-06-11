@@ -7,7 +7,7 @@
 
 import { loadUserColors, typeStyle } from "./lib/type-colors"
 import { loadUserTheme, themeCssVar } from "./lib/theme"
-import { SLOTS, SLOT_IDS, DIMS, DIM_IDS, HOOK_HINTS, loadEnabledSlots, SlotId, Dim, computeDaySuggestions, loadWeekdayWeights, loadTopCategoryForDim } from "./lib/schedule-constants"
+import { SLOTS, SLOT_IDS, DIMS, DIM_IDS, HOOK_HINTS, loadEnabledSlots, SlotId, Dim, computeDaySuggestions, loadWeekdayWeights, loadTopCategoryForDim, pickSubtheme, DIMENSION_TYPE_MAP } from "./lib/schedule-constants"
 import { getThemeWeights } from "./api/theme-month"
 
 interface User {
@@ -298,6 +298,7 @@ export async function onRequestGet(ctx: {
       origin,
       colors,
       theme,
+      postDim,           // D55-12 修复
     })
   } catch (err) {
     console.error('[D55-10 DEBUG] today.ts renderToday threw:', err)
@@ -481,8 +482,14 @@ function renderToday(args: {
   origin: string
   colors: Record<string, { bg: string; fg: string }>
   theme: { start: string; end: string; solid: string }
+  postDim: Dim                                                               // D55-12 修复
 }): string {
-  const { user, todayStr, weekday, scheduleBySlot, addonsBySlot, draftsBySlot, enabledSlots, introsMap, casesList, quotesList, formulasList, monthSchedule, weekData, themeMonth, weekTheme, monthPhase, themeTopType, weekTopPosted, weekTopSuggested, dimCounts, lowDims, dimMax, daySuggestion, daySuggestionError, todaySuggestion, todaySuggestionError, origin, colors, theme } = args
+  const { user, todayStr, weekday, scheduleBySlot, addonsBySlot, draftsBySlot, enabledSlots, introsMap, casesList, quotesList, formulasList, monthSchedule, weekData, themeMonth, weekTheme, monthPhase, themeTopType, weekTopPosted, weekTopSuggested, dimCounts, lowDims, dimMax, daySuggestion, daySuggestionError, todaySuggestion, todaySuggestionError, origin, colors, theme, postDim } = args
+  // D55-12 修复：D55-11 删孤儿 comment 时把 oldTypeToDim 定义误归到 renderMonthStrip，
+  // 重新在 renderToday 顶部定义（与 onRequestGet line 128 一致）
+  const oldTypeToDim: Record<string, Dim> = {
+    '干货': 'F', '生活': 'E', '客户': 'B', '互动': 'G', '软广': 'C', '复盘': 'F', '休息': 'E',
+  }
   // 向后兼容：postType（AI 帮写区还引用）+ D55 用 postDim 渲染
   const firstSlot = enabledSlots[0] || "morning"
   const firstSched = scheduleBySlot[firstSlot] || scheduleBySlot["morning"] || null

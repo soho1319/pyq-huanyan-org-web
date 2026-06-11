@@ -45,10 +45,28 @@ export const ALL_COLORS: Record<string, { bg: string; fg: string }> = {
 
 export async function loadUserColors(env: { DB?: D1Database }, userId: string): Promise<Record<string, { bg: string; fg: string }>> {
   if (!env.DB) return ALL_COLORS
-  // D55: 优先读 dim_colors（新字段），回退到 type_colors（旧字段）
-  const row = await env.DB.prepare(
-    "SELECT dim_colors, type_colors FROM user_settings WHERE user_id = ?"
-  ).bind(userId).first<{ dim_colors: string | null; type_colors: string | null }>()
+  // D55-12 兼容：旧 D1 schema 没有 dim_colors 列，必须 try/catch fallback
+  // 先试新 schema (dim_colors + type_colors)，失败回退旧 schema (type_colors only)
+  let row: { dim_colors?: string | null; type_colors?: string | null } | null = null
+  try {
+    row = await env.DB.prepare(
+      "SELECT dim_colors, type_colors FROM user_settings WHERE user_id = ?"
+    ).bind(userId).first<{ dim_colors: string | null; type_colors: string | null }>()
+  } catch (err) {
+    // 旧 schema: dim_colors 列不存在（生产 D1 还没 apply D55 migrations）
+    const msg = err instanceof Error ? err.message : String(err)
+    if (!/no such column: dim_colors/i.test(msg)) {
+      console.error('[loadUserColors] unexpected D1 error:', err)
+    }
+    try {
+      row = await env.DB.prepare(
+        "SELECT type_colors FROM user_settings WHERE user_id = ?"
+      ).bind(userId).first<{ type_colors: string | null }>()
+    } catch (err2) {
+      console.error('[loadUserColors] fallback query also failed:', err2)
+      return ALL_COLORS
+    }
+  }
   if (!row) return ALL_COLORS
   let merged: Record<string, { bg: string; fg: string }> = { ...ALL_COLORS }
   if (row.type_colors) {
