@@ -124,6 +124,8 @@ async function buildPrompt(
     : "\n### 我写过的公式填空\n（暂无）"
 
   const addonBlock = addon ? `\n### 当日加量\n${truncate(addon, 200)}` : ""
+  // D54: 子主题小标签（如"📍 场景 D 痛点具象化"），让 AI 写得更具体
+  const subthemeBlock = subtheme ? `\n### D54 子主题方向\n**${subtheme}** — 围绕这个具体小主题写，不要泛泛而谈` : ""
 
   // D40: 本周主题 + 月阶段 + 7 维度提示 合并到任务段
   const prompt = `你是"内容营销朋友圈"课程体系下的"文案教练"。根据以下素材，为用户写 3 条今日朋友圈候选文案。
@@ -133,12 +135,13 @@ ${PUBLIC_FORMULAS}
 ====================================
 用户素材
 ====================================
-${introsBlock}${casesBlock}${quotesBlock}${formulasBlock}${addonBlock}
+${introsBlock}${casesBlock}${quotesBlock}${formulasBlock}${addonBlock}${subthemeBlock}
 
 ====================================
-今日任务（含 D40: 本周主题 + 月阶段 + 7 维度）
+今日任务（含 D40: 本周主题 + 月阶段 + 7 维度 + D54 子主题）
 ====================================
 - 今日类型：**${todayType}**
+${subtheme ? `- D54 子主题：${subtheme}（这是重点方向，每条都要扣住这个具体小主题）` : ''}
 - 本周主题：${weekTheme.label}（${weekTheme.cycleIndex + 1}/4 周）—— 重点发 ${weekTypeFocus}
 - 月阶段：${monthPhase.label}（${monthPhase.cycleIndex}/3 月）
 - 7维度本周已发：${dimSummary} → 建议多发：${lowDims}
@@ -245,10 +248,11 @@ export async function onRequestPost(ctx: {
 }): Promise<Response> {
   try {
     const user = getUser(ctx) as User
-    const body = await readJson<{ todayType?: string; addon?: string; slot?: string }>(ctx.request)
+    const body = await readJson<{ todayType?: string; addon?: string; slot?: string; subtheme?: string }>(ctx.request)
     const todayType = String(body.todayType || "干货").trim()
     const addon = body.addon ? String(body.addon).trim() : undefined
     const slot = body.slot ? String(body.slot) : "morning"
+    const subtheme = body.subtheme ? String(body.subtheme).trim() : undefined
     if (!isSlot(slot)) {
       throw new CrudError(`slot 必须是 morning/noon/evening/night，当前：${slot}`, 400)
     }

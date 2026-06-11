@@ -93,6 +93,73 @@ export const TYPE_TIPS: Record<string, string> = {
 🕐 最佳时段：周末早 8 / 节假日 / 情绪低沉日`,
 }
 
+// D54: 每个 type 抽 4-5 个"📍 场景 XXXX"子主题（从 TYPE_TIPS 多行内容里精选）
+// 用途: /today 卡片 type badge 旁边显示"📍 场景 A 立人设"细标签，AI prompt 也用
+// 不持久化到 D1，runtime 按日期 hash 选 1 个（同一 type 同一天看到的 subtheme 一致）
+export const TYPE_SUBTHEMES: Record<string, Array<{ id: string; label: string }>> = {
+  "干货": [
+    { id: "A", label: "立人设 4 步" },
+    { id: "D", label: "痛点具象化" },
+    { id: "反认知", label: "反认知金句 11 公式" },
+    { id: "谈单", label: "谈单句式 3 法" },
+    { id: "故事文", label: "故事文万能结构" },
+  ],
+  "生活": [
+    { id: "F-有趣", label: "有趣好玩 5 写法" },
+    { id: "F-价值观", label: "价值观 5 种" },
+    { id: "小确幸", label: "小确幸/至暗时刻" },
+    { id: "连载", label: "辞职/结婚/跑步连载" },
+    { id: "周末", label: "周末高颜值生活照" },
+  ],
+  "客户": [
+    { id: "C-证言", label: "客户证言万能 5 要素" },
+    { id: "C-直播", label: "直播稿 SOP 6 步" },
+    { id: "宣发", label: "朋友圈宣发 4 步" },
+    { id: "塑产品", label: "塑产品 5 种讲述" },
+    { id: "反差", label: "前后反差对比图" },
+  ],
+  "互动": [
+    { id: "B-钩子", label: "3 类钩子（加 V/私聊/线索）" },
+    { id: "福利", label: "点赞=福利（第 N 位）" },
+    { id: "观点", label: "站队提问" },
+    { id: "话题", label: "生活话题互动" },
+    { id: "5场景", label: "发钩子 5 个场景" },
+  ],
+  "软广": [
+    { id: "E-5步", label: "软广 5 步法" },
+    { id: "童话", label: "改写童话" },
+    { id: "古代", label: "改写古代" },
+    { id: "电视剧", label: "改写电视剧" },
+    { id: "日常", label: "改写日常生活" },
+  ],
+  "复盘": [
+    { id: "故事", label: "故事万能 5 段式" },
+    { id: "7年", label: "7 年年轮法" },
+    { id: "宣发", label: "宣发 4 步（结果前置）" },
+    { id: "反差", label: "30 天前 vs 现在" },
+    { id: "周复盘", label: "周复盘 + 7 维度诊断" },
+  ],
+  "休息": [
+    { id: "G-防折叠", label: "防折叠 5 规则" },
+    { id: "小绿书", label: "小绿书操作" },
+    { id: "三件套", label: "头像/封面/签名" },
+    { id: "心情", label: "1 张图 + 1 句心情" },
+    { id: "轻松日", label: "周末/节假日最佳" },
+  ],
+}
+
+// D54: 按 date+type hash 选 1 个 subtheme（确保同一天同一 type 看到一致的）
+export function pickSubtheme(type: string, date: string): { id: string; label: string } | null {
+  const list = TYPE_SUBTHEMES[type]
+  if (!list || list.length === 0) return null
+  // 简单 hash: 字符串 char 累加
+  let h = 0
+  const s = date + type
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  const idx = Math.abs(h) % list.length
+  return list[idx]
+}
+
 // ymd 工具（之前重复 5+ 处）
 export function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`

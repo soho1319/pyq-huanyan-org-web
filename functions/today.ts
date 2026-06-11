@@ -7,7 +7,7 @@
 
 import { loadUserColors, typeStyle } from "./lib/type-colors"
 import { loadUserTheme, themeCssVar } from "./lib/theme"
-import { SLOTS, SLOT_IDS, TYPE_TIPS, HOOK_HINTS, loadEnabledSlots, SlotId, DIMENSION_TYPE_MAP, computeDaySuggestions, loadWeekdayWeights } from "./lib/schedule-constants"
+import { SLOTS, SLOT_IDS, TYPE_TIPS, HOOK_HINTS, loadEnabledSlots, SlotId, DIMENSION_TYPE_MAP, computeDaySuggestions, loadWeekdayWeights, TYPE_SUBTHEMES, pickSubtheme } from "./lib/schedule-constants"
 import { getThemeWeights } from "./api/theme-month"
 
 interface User {
@@ -508,7 +508,7 @@ ${themeCssVar(theme)}
             <span class="status status-${r?.status || 'pending'}">${statusText}</span>
             ${(sid === 'morning' || sid === 'noon' || sid === 'evening') ? `<button type="button" class="btn-skip-slot" data-skip-slot="${sid}" data-skip-date="${todayStr}" title="今日不发这${meta.label}（到 📅 日历 可恢复）">⏸ 今日不发</button>` : ''}
           </div>
-          <div class="type-badge" style="${schedTypeCss}">${schedType}</div>
+          <div class="type-badge" style="${schedTypeCss}">${schedType}${(() => { const s = pickSubtheme(schedType, todayStr); return s ? `<span class="type-subtheme">📍 ${s.label}</span>` : '' })()}</div>
           <p class="type-tip">${escapeHtml(TYPE_TIPS[schedType] || '')}</p>
           ${r?.note ? `<div class="note-box">📝 加量：${escapeHtml(r.note)}</div>` : ''}
           ${slotAddons.length > 0 ? `<div class="addon-list">
@@ -548,7 +548,7 @@ ${themeCssVar(theme)}
                 <button type="button" class="btn-copy" data-target="posted_${sid}">📋 复制</button>
               </div>
             ` : ''}
-            <button type="button" class="btn-ai btn-ai-slot" data-type="${schedType}" data-slot="${sid}" data-addon="${escapeHtml(r?.note || '')}">🤖 AI 帮我写 3 条候选</button>
+            <button type="button" class="btn-ai btn-ai-slot" data-type="${schedType}" data-slot="${sid}" data-addon="${escapeHtml(r?.note || '')}" data-subtheme="${escapeHtml((() => { const s = pickSubtheme(schedType, todayStr); return s ? s.label : '' })())}">🤖 AI 帮我写 3 条候选</button>
             <span class="ai-status muted" id="aiStatus_${sid}"></span>
             <div class="ai-drafts" id="aiDrafts_${sid}" style="display:none"></div>
           </div>
@@ -706,6 +706,7 @@ ${themeCssVar(theme)}
         const slot = btn.dataset.slot
         const todayType = btn.dataset.type
         const addon = btn.dataset.addon || ''
+        const subtheme = btn.dataset.subtheme || ''
         const status = document.getElementById('aiStatus_' + slot)
         const draftsBox = document.getElementById('aiDrafts_' + slot)
         btn.disabled = true
@@ -718,7 +719,7 @@ ${themeCssVar(theme)}
           const resp = await fetch('/api/ai/draft', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ todayType, addon, slot }),
+            body: JSON.stringify({ todayType, addon, slot, subtheme }),
           })
           const data = await resp.json()
           if (!data.ok || !data.drafts || data.drafts.length === 0) {
@@ -1075,6 +1076,7 @@ main { max-width: 760px; margin: 0 auto; padding: 20px; }
 .type-休息 { background: #edf2f7; color: #4a5568; }
 .type-tip { color: #4a5568; font-size: 14px; margin: 4px 0 12px; white-space: pre-line; line-height: 1.65; }
 .type-tip::first-line { font-weight: 600; color: #2d3748; }
+.type-subtheme { margin-left: 8px; padding: 2px 8px; background: rgba(255,255,255,0.6); color: #4a5568; border-radius: 10px; font-size: 11px; font-weight: 500; }
 .template { color: #4a5568; font-size: 14px; margin-bottom: 12px; }
 .template code { background: #edf2f7; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
 .note-box {
