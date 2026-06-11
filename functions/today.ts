@@ -7,7 +7,7 @@
 
 import { loadUserColors, typeStyle } from "./lib/type-colors"
 import { loadUserTheme, themeCssVar } from "./lib/theme"
-import { SLOTS, SLOT_IDS, TYPE_TIPS, HOOK_HINTS, loadEnabledSlots, SlotId, DIMENSION_TYPE_MAP, computeDaySuggestions, loadWeekdayWeights, TYPE_SUBTHEMES, pickSubtheme } from "./lib/schedule-constants"
+import { SLOTS, SLOT_IDS, DIMS, DIM_IDS, HOOK_HINTS, loadEnabledSlots, SlotId, Dim, computeDaySuggestions, loadWeekdayWeights, loadTopCategoryForDim } from "./lib/schedule-constants"
 import { getThemeWeights } from "./api/theme-month"
 
 interface User {
@@ -72,6 +72,7 @@ export async function onRequestGet(ctx: {
   env: { DB?: D1Database; SESSION_SECRET?: string }
   data: Record<string, unknown>
 }): Promise<Response> {
+  try {
   const user = ctx.data.user as User | undefined
   if (!user) {
     return new Response("未登录", { status: 401 })
@@ -123,6 +124,13 @@ export async function onRequestGet(ctx: {
   // 兼容旧变量：schedule = 第一条（按 sort_order ASC 的固定行）
   const schedule: ScheduleRow | null = scheduleBySlot[enabledSlots[0] || "morning"] || null
   const postType = schedule?.post_type || "休息"
+  // D55: dim（替代旧 post_type）。如果 schedule 没有 dim 列（旧 schema），从 post_type 反向映射
+  const oldTypeToDim: Record<string, Dim> = {
+    '干货': 'F', '生活': 'E', '客户': 'B', '互动': 'G', '软广': 'C', '复盘': 'F', '休息': 'E',
+  }
+  const postDim: Dim = (schedule?.dim && DIM_IDS.includes(schedule.dim as Dim))
+    ? (schedule.dim as Dim)
+    : (oldTypeToDim[postType] || 'F')
 
   // 查我的素材
   const intros = await ctx.env.DB.prepare(
@@ -151,8 +159,8 @@ export async function onRequestGet(ctx: {
   const [y, m] = [parseInt(todayStr.slice(0, 4)), parseInt(todayStr.slice(5, 7))]
   const nextMonth = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`
   const monthSchedule = await ctx.env.DB.prepare(
-    "SELECT date, post_type, status FROM schedule WHERE user_id = ? AND date >= ? AND date < ? ORDER BY date ASC"
-  ).bind(user.id, monthStart, nextMonth).all<{ date: string; post_type: string; status: string }>()
+    "SELECT date, post_type, dim, status FROM schedule WHERE user_id = ? AND date >= ? AND date < ? ORDER BY date ASC"
+  ).bind(user.id, monthStart, nextMonth).all<{ date: string; post_type: string; dim: string | null; status: string }>()
 
   // ★ D30: 查本周汇总（周一开始）
   const { loadWeekData } = await import("./lib/weekly")
@@ -216,16 +224,40 @@ export async function onRequestGet(ctx: {
     console.error('[D42-E/D46] computeDaySuggestions failed:', err)
   }
 
-  // ★ D40: 算本周 7 维度覆盖（用 post_type 反查人设维度）
+  // ★ D40: 算本周 7 维度覆盖（D55：直接从 schedule.dim 字段读）
   const dimCounts: Record<string, number> = {}
-  for (const dim of Object.keys(DIMENSION_TYPE_MAP)) dimCounts[dim] = 0
+  for (const d of DIM_IDS) dimCounts[d] = 0
+  // 查本周所有 schedule 的 dim 字段（D55-10 修：weekStartStr 不存在，应转 weekStart 为 YYYY-MM-DD）
+  const weekStartStr = weekStart.toISOString().slice(0, 10)
+  const weekDims = await ctx.env.DB.prepare(
+    "SELECT dim FROM schedule WHERE user_id = ? AND date >= ? AND date <= ? AND dim IS NOT NULL"
+  ).bind(user.id, weekStartStr, todayStr).all<{ dim: string }>()
+  for (const r of weekDims.results || []) {
+    dimCounts[r.dim] = (dimCounts[r.dim] || 0) + 1
+  }
+  // 同时合并 weekData.byType（兼容旧 schema，回退逻辑）
   for (const r of weekData.byType ? Object.entries(weekData.byType) : []) {
-    const dims = reverseDimensionMap(r[0])
-    for (const d of dims) dimCounts[d] = (dimCounts[d] || 0) + r[1]
+    const dim = oldTypeToDim[r[0]]
+    if (dim) dimCounts[dim] = (dimCounts[dim] || 0) + r[1]
   }
   const sortedDims = Object.entries(dimCounts).sort((a, b) => a[1] - b[1])
   const lowDims = sortedDims.slice(0, 2).map(([d]) => d)
   const dimMax = Math.max(1, ...Object.values(dimCounts))  // 进度条分母
+
+  // D55: 为今天第一段（最早段）查对应的 category（top1 小类 + 框架示例）
+  let firstSlotCategory: string | null = null
+  let firstSlotCategoryName: string | null = null
+  let firstSlotFrame: string | null = null
+  if (enabledSlots.length > 0) {
+    const cat = await loadTopCategoryForDim(ctx.env, postDim, enabledSlots[0])
+    if (cat) {
+      firstSlotCategory = cat.id
+      firstSlotCategoryName = cat.name
+      const { loadFramesByCategory } = await import("./lib/schedule-constants")
+      const frames = await loadFramesByCategory(ctx.env, cat.id)
+      if (frames.length > 0) firstSlotFrame = frames[0].example
+    }
+  }
 
   const introsMap: Record<string, string> = {}
   for (const r of intros.results || []) introsMap[r.slot] = r.content
@@ -234,6 +266,60 @@ export async function onRequestGet(ctx: {
   const formulasList = formulas.results || []
 
   // 渲染 HTML
+  let html: string
+  try {
+    html = renderToday({
+      user,
+      todayStr,
+      weekday,
+      scheduleBySlot,
+      addonsBySlot,        // D46
+      draftsBySlot,
+      enabledSlots,
+      introsMap,
+      casesList,
+      quotesList,
+      formulasList,
+      monthSchedule: monthSchedule.results || [],
+      weekData,
+      themeMonth: themeMonthRow,
+      weekTheme,
+      monthPhase,
+      themeTopType,
+      weekTopPosted,
+      weekTopSuggested,
+      dimCounts,
+      lowDims,
+      dimMax,
+      daySuggestion: daySuggestion!,
+      daySuggestionError,
+      todaySuggestion,     // D46
+      todaySuggestionError,// D46
+      origin,
+      colors,
+      theme,
+    })
+  } catch (err) {
+    console.error('[D55-10 DEBUG] today.ts renderToday threw:', err)
+    return new Response(
+      `<html><body><h1>/today 渲染失败</h1><pre style="white-space:pre-wrap;background:#fef5e7;padding:16px;border-radius:8px;font-size:13px;color:#c53030">${(err instanceof Error ? err.stack : String(err))?.replace(/</g, "&lt;") || "unknown"}</pre></body></html>`,
+      { status: 500, headers: { "Content-Type": "text/html; charset=utf-8" } }
+    )
+  }
+
+  return new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
+  })
+  } catch (err) {
+    console.error('[D55-10 DEBUG] today.ts onRequestGet threw:', err)
+    return new Response(
+      `<html><body><h1>/today 失败</h1><pre style="white-space:pre-wrap;background:#fed7d7;padding:16px;border-radius:8px;font-size:13px;color:#c53030">${(err instanceof Error ? err.stack : String(err))?.replace(/</g, "&lt;") || "unknown"}</pre></body></html>`,
+      { status: 500, headers: { "Content-Type": "text/html; charset=utf-8" } }
+    )
+  }
+}
+
+/* 旧版（保留，注释掉）
   const html = renderToday({
     user,
     todayStr,
@@ -275,16 +361,17 @@ function renderDaySuggestion(
   s: import("./lib/schedule-constants").DaySuggestion,
   colors: Record<string, { bg: string; fg: string }>
 ): string {
-  const slotOrder: SlotId[] = ['morning', 'noon', 'evening', 'night']
-  const slotMeta = SLOTS.find(sl => sl.id === 'morning')! // 用 SLOTS 标签
-  const slotLabelMap: Record<SlotId, string> = { morning: '早 8', noon: '午 12:30', evening: '晚 20', night: '夜 22:30' }
-  const topTypeStyle = (t: string) => `background:${colors[t]?.bg || '#e2e8f0'};color:${colors[t]?.fg || '#1a202c'};`
+  // D55: 5 段时间顺序（早/午/傍/晚/夜）
+  const slotOrder: SlotId[] = ['morning', 'noon', 'evening', 'late', 'night']
+  const slotLabelMap: Record<SlotId, string> = { morning: '早 8', noon: '午 12:30', evening: '傍晚 18', late: '晚 20', night: '夜 22:30' }
+  const topDimStyle = (d: string) => `background:${colors[d]?.bg || '#e2e8f0'};color:${colors[d]?.fg || '#1a202c'};`
+  const dimName = (d: string) => DIMS.find(x => x.id === d)?.name || d
 
   return `
   <section class="card day-suggestion-card">
     <div class="card-head">
       <h2>💡 明日建议（${s.date} · ${s.weekdayLabel}${s.isWeekend ? ' · 周末' : ''}）</h2>
-      <span class="muted">提前 1 天规划，按 D36 4 层权重算</span>
+      <span class="muted">提前 1 天规划，按 D55 7 维度 + 5 段权重算</span>
     </div>
     <div class="ds-theme-row">
       <span class="theme-week-badge">📌 周主题：<strong>${escapeHtml(s.weekTheme.label)}</strong>（第 ${s.weekTheme.cycleIndex + 1}/4 周）</span>
@@ -292,8 +379,8 @@ function renderDaySuggestion(
       <span class="muted ds-phase">周内比重：<strong>${s.weekdayPhase === 'early' ? '周初' : s.weekdayPhase === 'mid' ? '周中' : '周末'}</strong></span>
     </div>
     <div class="ds-day-top">
-      <span class="muted">明日 4 段联合最推 →</span>
-      <span class="ds-day-top-type" style="${topTypeStyle(s.dayTopType)}">${s.dayTopType}</span>
+      <span class="muted">明日 5 段联合最推 →</span>
+      <span class="ds-day-top-type" style="${topDimStyle(s.dayTopDim)}">${s.dayTopDim} ${escapeHtml(dimName(s.dayTopDim))}</span>
       <span class="muted">${escapeHtml(s.dayTopHint)}</span>
     </div>
     <div class="ds-slots">
@@ -302,10 +389,9 @@ function renderDaySuggestion(
         return `
         <div class="ds-slot">
           <div class="ds-slot-time">${slotLabelMap[sid]}</div>
-          <div class="ds-slot-type" style="${topTypeStyle(slot.type)}">${slot.type}<span class="ds-weight">${slot.weight1}%</span></div>
-          <div class="ds-slot-alt">备选 <span class="ds-alt-type" style="${topTypeStyle(slot.type2)}">${slot.type2}</span> ${slot.weight2}%</div>
+          <div class="ds-slot-type" style="${topDimStyle(slot.dim)}">${slot.dim} ${escapeHtml(dimName(slot.dim))}<span class="ds-weight">${slot.weight1}%</span></div>
+          <div class="ds-slot-alt">备选 <span class="ds-alt-type" style="${topDimStyle(slot.dim2)}">${slot.dim2} ${escapeHtml(dimName(slot.dim2))}</span> ${slot.weight2}%</div>
           <div class="ds-slot-hint">${escapeHtml(slot.hookHint)}</div>
-          <div class="ds-slot-dims">${slot.topDims.map(d => `<span class="ds-dim">${d}</span>`).join(' ')}</div>
         </div>
         `
       }).join('')}
@@ -315,14 +401,20 @@ function renderDaySuggestion(
 }
 
 function renderMonthStrip(
-  monthSchedule: Array<{ date: string; post_type: string; status: string }>,
+  monthSchedule: Array<{ date: string; post_type: string; dim: string | null; status: string }>,
   todayStr: string,
   colors: Record<string, { bg: string; fg: string }>,
   monthLabel: string
 ): string {
-  // 把排期 map 化
-  const map: Record<string, { post_type: string; status: string }> = {}
-  for (const r of monthSchedule) map[r.date] = { post_type: r.post_type, status: r.status }
+  // 把排期 map 化（D55 优先用 dim，兼容旧 post_type）
+  const oldTypeToDim: Record<string, string> = {
+    '干货': 'F', '生活': 'E', '客户': 'B', '互动': 'G', '软广': 'C', '复盘': 'F', '休息': 'E',
+  }
+  const map: Record<string, { dim: string; post_type: string; status: string }> = {}
+  for (const r of monthSchedule) {
+    const dim = r.dim || oldTypeToDim[r.post_type] || 'F'
+    map[r.date] = { dim, post_type: r.post_type, status: r.status }
+  }
 
   // 当月天数
   const [y, m] = [parseInt(monthLabel.slice(0, 4)), parseInt(monthLabel.slice(5, 7))]
@@ -337,7 +429,6 @@ function renderMonthStrip(
 
   // 渲染 30 天网格
   const cells: string[] = []
-  // 补空格
   for (let i = 0; i < firstWd; i++) cells.push('<div class="day-cell empty"></div>')
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${monthLabel}-${String(d).padStart(2, "0")}`
@@ -349,7 +440,7 @@ function renderMonthStrip(
     let mark = ''
     if (r) {
       cellClass += ' has'
-      const cs = colors[r.post_type] || { bg: '#e2e8f0', fg: '#1a202c' }
+      const cs = colors[r.dim] || { bg: '#e2e8f0', fg: '#1a202c' }
       cellStyle = `background:${cs.bg};color:${cs.fg};`
       if (r.status === 'posted') mark = '<span class="day-mark">✓</span>'
       else if (r.status === 'skipped') mark = '<span class="day-mark skip">—</span>'
@@ -359,7 +450,7 @@ function renderMonthStrip(
     if (isToday) cellClass += ' today'
     if (isPast && !r) cellClass += ' past'
     cells.push(
-      `<div class="${cellClass}" style="${cellStyle}" title="${ds} ${r ? r.post_type + ' ' + r.status : '未排期'}">` +
+      `<div class="${cellClass}" style="${cellStyle}" title="${ds} ${r ? r.dim + ' ' + r.status : '未排期'}">` +
         `<span class="day-num">${d}</span>${mark}` +
       `</div>`
     )
@@ -427,14 +518,16 @@ function renderToday(args: {
   theme: { start: string; end: string; solid: string }
 }): string {
   const { user, todayStr, weekday, scheduleBySlot, addonsBySlot, draftsBySlot, enabledSlots, introsMap, casesList, quotesList, formulasList, monthSchedule, weekData, themeMonth, weekTheme, monthPhase, themeTopType, weekTopPosted, weekTopSuggested, dimCounts, lowDims, dimMax, daySuggestion, daySuggestionError, todaySuggestion, todaySuggestionError, origin, colors, theme } = args
-  // 向后兼容：保留 postType / templateId / templateName / typeTip（AI 帮写区还引用）
+  // 向后兼容：postType（AI 帮写区还引用）+ D55 用 postDim 渲染
   const firstSlot = enabledSlots[0] || "morning"
   const firstSched = scheduleBySlot[firstSlot] || scheduleBySlot["morning"] || null
   const postType = firstSched?.post_type || "休息"
+  const postDimName = DIMS.find(x => x.id === postDim)?.name || postDim
   const templateId = firstSched?.template_id || "lifestyle"
   const templateName = TEMPLATE_NAMES[templateId] || templateId
-  const typeTip = TYPE_TIPS[postType] || ""
-  const typeCss = typeStyle(colors, postType)
+  // D55: dim 替代旧 type tips（如果没旧 TYPE_TIPS 用 HOOK_HINTS 替代）
+  const typeTip = (HOOK_HINTS[postDim] || '').split('\n').find(l => l.trim()) || ''
+  const typeCss = typeStyle(colors, postDim)
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -492,7 +585,9 @@ ${themeCssVar(theme)}
         const r = scheduleBySlot[sid] || scheduleBySlot["morning"] // 兼容旧 slot='main' 兜底（migration 已统一为 'morning'）
         const draft = draftsBySlot[sid]
         const schedType = r?.post_type || "休息"
-        const schedTypeCss = typeStyle(colors, schedType)
+        const schedDim: Dim = (r?.dim && DIM_IDS.includes(r.dim as Dim)) ? (r.dim as Dim) : (oldTypeToDim[schedType] || 'F')
+        const schedTypeCss = typeStyle(colors, schedDim)
+        const schedDimName = DIMS.find(x => x.id === schedDim)?.name || schedDim
         const statusText = r ? (r.status === 'posted' ? '✓ 已发' : r.status === 'skipped' ? '— 跳' : '○ 待发') : '○ 待发'
         // D46: 已有加量（DB 里 sort_order>=1 的行）
         const slotAddons = addonsBySlot[sid] || []
@@ -508,21 +603,21 @@ ${themeCssVar(theme)}
             <span class="status status-${r?.status || 'pending'}">${statusText}</span>
             ${(sid === 'morning' || sid === 'noon' || sid === 'evening') ? `<button type="button" class="btn-skip-slot" data-skip-slot="${sid}" data-skip-date="${todayStr}" title="今日不发这${meta.label}（到 📅 日历 可恢复）">⏸ 今日不发</button>` : ''}
           </div>
-          <div class="type-badge" style="${schedTypeCss}">${schedType}${(() => { const s = pickSubtheme(schedType, todayStr); return s ? `<span class="type-subtheme">📍 ${s.label}</span>` : '' })()}</div>
-          <p class="type-tip">${escapeHtml(TYPE_TIPS[schedType] || '')}</p>
+          <div class="type-badge" style="${schedTypeCss}">${schedDim} ${escapeHtml(schedDimName)}${(() => { const s = pickSubtheme(schedDim, todayStr); return s ? `<span class="type-subtheme">📍 ${s.label}</span>` : '' })()}</div>
+          <p class="type-tip">${escapeHtml((HOOK_HINTS[schedDim] || '').split('\n').find(l => l.trim()) || '')}</p>
           ${r?.note ? `<div class="note-box">📝 加量：${escapeHtml(r.note)}</div>` : ''}
           ${slotAddons.length > 0 ? `<div class="addon-list">
             ${slotAddons.map((a, idx) => `
               <div class="addon-row">
-                <span class="addon-badge" style="${typeStyle(colors, a.post_type)}">➕ 加量 ${idx + 1} · ${a.post_type}</span>
+                <span class="addon-badge" style="${typeStyle(colors, a.dim || oldTypeToDim[a.post_type] || 'F')}">➕ 加量 ${idx + 1} · ${a.dim || oldTypeToDim[a.post_type] || 'F'}</span>
                 ${a.status === 'posted' ? '<span class="status status-posted">✓ 已发</span>' : a.status === 'skipped' ? '<span class="status status-skipped">— 跳</span>' : '<span class="status status-pending">○ 待发</span>'}
               </div>
             `).join('')}
           </div>` : ''}
-          ${hasCandidate ? `<div class="candidate-card" data-slot="${sid}" data-fixed="${escapeHtml(schedType)}" data-topn='${escapeHtml(topNJson)}' data-idx="1">
+          ${hasCandidate ? `<div class="candidate-card" data-slot="${sid}" data-fixed="${escapeHtml(schedDim)}" data-topn='${escapeHtml(topNJson)}' data-idx="1">
             <div class="candidate-head">➕ 可选加量（D46 top2）</div>
             <div class="candidate-body">
-              <span class="candidate-type-badge" data-cand-type style="${typeStyle(colors, slotSug.type2)}">${slotSug.type2}</span>
+              <span class="candidate-type-badge" data-cand-type style="${typeStyle(colors, slotSug.dim2)}">${slotSug.dim2}</span>
               <span class="candidate-weight" data-cand-weight>${slotSug.weight2}%</span>
               <span class="candidate-hook muted" data-cand-hook>${escapeHtml(candidateFirstHook)}</span>
             </div>
@@ -548,7 +643,7 @@ ${themeCssVar(theme)}
                 <button type="button" class="btn-copy" data-target="posted_${sid}">📋 复制</button>
               </div>
             ` : ''}
-            <button type="button" class="btn-ai btn-ai-slot" data-type="${schedType}" data-slot="${sid}" data-addon="${escapeHtml(r?.note || '')}" data-subtheme="${escapeHtml((() => { const s = pickSubtheme(schedType, todayStr); return s ? s.label : '' })())}">🤖 AI 帮我写 3 条候选</button>
+            <button type="button" class="btn-ai btn-ai-slot" data-dim="${schedDim}" data-type="${schedType}" data-slot="${sid}" data-addon="${escapeHtml(r?.note || '')}" data-subtheme="${escapeHtml((() => { const s = pickSubtheme(schedDim, todayStr); return s ? s.label : '' })())}">🤖 AI 帮我写 3 条候选</button>
             <span class="ai-status muted" id="aiStatus_${sid}"></span>
             <div class="ai-drafts" id="aiDrafts_${sid}" style="display:none"></div>
           </div>
@@ -586,7 +681,7 @@ ${themeCssVar(theme)}
       <div class="week-types">
         <span class="muted">类型：</span>
         ${Object.entries(weekData.byType).sort((a, b) => b[1] - a[1]).map(([t, n]) =>
-          `<span class="type-tag" style="${typeStyle(colors, t)}">${t} ${n}</span>`
+          `<span class="type-tag" style="${typeStyle(colors, t)}">${t} ${DIMS.find(x => x.id === t)?.name || ''} ${n}</span>`
         ).join(' ')}
       </div>
       ` : ''}
@@ -610,7 +705,7 @@ ${themeCssVar(theme)}
         <h2>🎯 本周 7 维度覆盖</h2>
         ${lowDims.length > 0 && lowDims[0] ? `<span class="muted">建议多发：<strong>${lowDims.map(d => `<span class="dim-low">${d}</span>`).join('、')}</strong></span>` : '<span class="muted">本周 7 维度全覆盖 ✓</span>'}
       </div>
-      <p class="muted" style="font-size:12px;margin-bottom:12px;">人设 7 维度由 post_type 反查：身份=干货+客户 / 原生=生活+互动 / 专业=干货+客户+软广 / 关系=互动+软广 / 思想=干货+复盘 / 链接=互动+软广 / 生活=生活+休息</p>
+      <p class="muted" style="font-size:12px;margin-bottom:12px;">📍 7 维度（A 观赏/B 专业/C 情绪/D 身份/E 生活/F 思想/G 关系）— 每天从 7 维度抽 3-5 个发，第二天调和缺啥补啥</p>
       <div class="dim-grid">
         ${Object.entries(DIMENSION_TYPE_MAP).map(([dim, types]) => {
           const n = dimCounts[dim] || 0
@@ -1003,265 +1098,265 @@ function renderIntroSlot(slot: string, label: string, content: string | undefine
   return `<details class="intro"><summary><span class="intro-label">${escapeHtml(label)}</span></summary><div class="intro-body">${escapeHtml(content)}</div></details>`
 }
 
-const styles = `
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: #f7fafc;
-  color: #1a202c;
-  line-height: 1.6;
-  padding-bottom: 60px;
-}
-.topbar {
-  position: sticky; top: 0; z-index: 10;
-  background: rgba(255,255,255,0.95);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border-bottom: 1px solid #e2e8f0;
-}
-.topbar-inner {
-  max-width: 760px; margin: 0 auto;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 20px;
-}
-.brand { font-weight: 700; font-size: 16px; text-decoration: none; color: #1a202c; }
-.user { display: flex; align-items: center; gap: 12px; font-size: 14px; }
-.user-name { color: #4a5568; }
-.badge { display: inline-block; padding: 1px 6px; background: #fef3c7; color: #92400e; border-radius: 4px; font-size: 11px; font-weight: 600; }
-.logout-btn {
-  padding: 4px 10px; background: #fff; color: #c53030;
-  border: 1px solid #fc8181; border-radius: 16px; text-decoration: none; font-size: 12px;
-}
-.logout-btn:hover { background: #fff5f5; }
-.subnav {
-  max-width: 760px; margin: 0 auto;
-  display: flex; gap: 8px; flex-wrap: wrap;
-  padding: 12px 20px 0;
-}
-.subnav a {
-  padding: 6px 12px; background: #fff; border: 1px solid #e2e8f0;
-  border-radius: 16px; text-decoration: none; color: #4a5568; font-size: 13px;
-}
-.subnav a.active, .subnav a:hover { background: var(--t); color: #fff; border-color: var(--t); }
-main { max-width: 760px; margin: 0 auto; padding: 20px; }
-.date-banner {
-  background: linear-gradient(135deg, var(--ts) 0%, var(--te) 100%);
-  color: #fff; padding: 24px; border-radius: 16px;
-  display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px;
-  box-shadow: 0 8px 24px rgba(var(--ts-rgb), 0.3);
-}
-.date-banner .date { font-size: 28px; font-weight: 700; }
-.date-banner .weekday { font-size: 16px; opacity: 0.9; }
-.card {
-  background: #fff; border-radius: 12px; padding: 20px 24px;
-  margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-  border: 1px solid #e2e8f0;
-}
-.card h2 { font-size: 18px; margin-bottom: 14px; color: #2d3748; }
-.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.status { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
-.status-pending { background: #fef3c7; color: #92400e; }
-.status-posted { background: #c6f6d5; color: #22543d; }
-.status-skipped { background: #e2e8f0; color: #4a5568; }
-.type-badge {
-  display: inline-block; padding: 6px 16px; border-radius: 20px;
-  font-weight: 700; font-size: 16px; margin: 8px 0;
-}
-.type-干货 { background: #ebf4ff; color: #2c5282; }
-.type-生活 { background: #fef5e7; color: #c05621; }
-.type-客户 { background: #e6fffa; color: #234e52; }
-.type-互动 { background: #faf5ff; color: #553c9a; }
-.type-软广 { background: #fff5f5; color: #c53030; }
-.type-复盘 { background: #f0fff4; color: #22543d; }
-.type-休息 { background: #edf2f7; color: #4a5568; }
-.type-tip { color: #4a5568; font-size: 14px; margin: 4px 0 12px; white-space: pre-line; line-height: 1.65; }
-.type-tip::first-line { font-weight: 600; color: #2d3748; }
-.type-subtheme { margin-left: 8px; padding: 2px 8px; background: rgba(255,255,255,0.6); color: #4a5568; border-radius: 10px; font-size: 11px; font-weight: 500; }
-.template { color: #4a5568; font-size: 14px; margin-bottom: 12px; }
-.template code { background: #edf2f7; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
-.note-box {
-  background: #fefcbf; border-left: 3px solid #ecc94b;
-  padding: 8px 12px; border-radius: 4px; margin: 12px 0;
-  color: #744210; font-size: 14px;
-}
-.addon-list { margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
-.addon-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f0fff4; border-left: 3px solid #48bb78; border-radius: 4px; }
-.addon-badge { padding: 3px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; }
-.candidate-card { margin: 10px 0 12px; padding: 10px 12px; background: #f7fafc; border: 1px dashed #cbd5e0; border-radius: 6px; }
-.candidate-head { font-size: 12px; color: #718096; margin-bottom: 6px; font-weight: 600; }
-.candidate-body { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.candidate-type-badge { padding: 3px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; }
-.candidate-weight { font-size: 12px; color: #4a5568; font-weight: 600; }
-.candidate-hook { font-size: 12px; flex: 1; min-width: 200px; }
-.candidate-actions { display: flex; gap: 6px; }
-.btn-cand-accept, .btn-cand-skip, .btn-cand-swap { padding: 5px 12px; font-size: 13px; border: 0; border-radius: 4px; cursor: pointer; }
-.btn-cand-accept { background: #48bb78; color: white; }
-.btn-cand-skip { background: #e2e8f0; color: #4a5568; }
-.btn-cand-swap { background: #edf2f7; color: #2d3748; }
-.btn-cand-accept:hover { background: #38a169; }
-.btn-cand-skip:hover { background: #cbd5e0; }
-}
-.month-strip-card .month-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; }
-.month-strip-card .ms { padding: 2px 8px; border-radius: 4px; background: #f7fafc; }
-.month-strip-card .ms-posted { background: #c6f6d5; color: #22543d; }
-.month-strip-card .ms-pending { background: #fefcbf; color: #744210; }
-.month-strip-card .ms-skipped { background: #e2e8f0; color: #4a5568; }
-.month-strip-card .ms-none { background: #fff; color: #a0aec0; border: 1px dashed #cbd5e0; }
-.month-strip-card .day-grid {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
-}
-.month-strip-card .day-weekday {
-  text-align: center; font-size: 11px; color: #a0aec0; padding: 4px 0; font-weight: 600;
-}
-.month-strip-card .day-cell {
-  aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  border-radius: 6px; font-size: 13px; position: relative; border: 1px solid transparent;
-  background: #fff; color: #4a5568;
-}
-.month-strip-card .day-cell.empty { background: transparent; border: none; }
-.month-strip-card .day-cell.none { background: #fff; color: #cbd5e0; border: 1px dashed #edf2f7; }
-.month-strip-card .day-cell.past { opacity: 0.5; }
-.month-strip-card .day-cell.today { border: 2px solid var(--t); box-shadow: 0 0 0 3px rgba(102,126,234,0.15); font-weight: 700; }
-.month-strip-card .day-num { line-height: 1; }
-.month-strip-card .day-mark { font-size: 9px; line-height: 1; margin-top: 1px; }
-.month-strip-card .day-mark.skip { opacity: 0.5; }
-.month-strip-card .month-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e2e8f0; }
-.month-strip-card .btn-seed { padding: 8px 14px; background: linear-gradient(135deg, var(--ts) 0%, var(--te) 100%); color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
-.month-strip-card .btn-seed:hover { opacity: 0.92; }
-.month-strip-card .btn-seed:disabled { opacity: 0.6; cursor: not-allowed; }
-@media (max-width: 640px) { .month-strip-card .day-cell { font-size: 11px; } .month-strip-card .day-mark { font-size: 8px; } }
-.week-summary-card .week-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; }
-.week-summary-card .theme-week-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 8px 0; border-bottom: 1px dashed #e2e8f0; margin-bottom: 10px; font-size: 13px; }
-.week-summary-card .theme-week-badge { padding: 3px 10px; background: linear-gradient(135deg, var(--ts) 0%, var(--te) 100%); color: #fff; border-radius: 4px; font-weight: 600; }
-.week-summary-card .theme-phase-badge { padding: 3px 10px; border-radius: 4px; font-weight: 600; }
-.week-summary-card .theme-phase-badge.phase-1 { background: #e6fffa; color: #234e52; }
-.week-summary-card .theme-phase-badge.phase-2 { background: #fef5e7; color: #744210; }
-.week-summary-card .theme-phase-badge.phase-3 { background: #ebf8ff; color: #2a4365; }
-.week-summary-card .theme-progress-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 10px; border-bottom: 1px dashed #e2e8f0; margin-bottom: 10px; font-size: 12px; }
-.week-summary-card .theme-progress-bar { height: 8px; background: #edf2f7; border-radius: 4px; overflow: hidden; }
-.week-summary-card .theme-progress-fill { height: 100%; background: linear-gradient(135deg, var(--ts) 0%, var(--te) 100%); transition: width 0.3s; }
-.week-summary-card .ws { padding: 3px 8px; border-radius: 4px; }
-.week-summary-card .ws-posted { background: #c6f6d5; color: #22543d; }
-.week-summary-card .ws-skipped { background: #e2e8f0; color: #4a5568; }
-.week-summary-card .ws-pending { background: #fefcbf; color: #744210; }
-.week-summary-card .ws-total { background: #edf2f7; color: #2d3748; }
-.week-summary-card .week-types, .week-summary-card .week-slots { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin: 6px 0; }
-.week-summary-card .type-tag { padding: 2px 8px; border-radius: 10px; font-size: 11px; }
-.week-summary-card .slot-tag { padding: 2px 8px; background: #edf2f7; border-radius: 4px; font-size: 11px; color: #2d3748; }
-.week-summary-card .weekly-summary-text { margin-top: 10px; padding: 10px; background: #f7fafc; border-radius: 6px; }
-.week-summary-card .weekly-summary-text pre { font-family: inherit; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+const styles = ""; /* D55-10 临时禁用 */
 
-/* D40: 7 维度覆盖卡片 */
-.dim-coverage-card { background: linear-gradient(135deg, rgba(102,126,234,0.03) 0%, rgba(118,75,162,0.01) 100%); border-color: rgba(102,126,234,0.2); }
-.dim-coverage-card .card-head { flex-wrap: wrap; gap: 8px; }
-.dim-coverage-card .dim-low { padding: 1px 8px; background: #fed7d7; color: #c53030; border-radius: 10px; font-size: 12px; font-weight: 600; }
-.dim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-.dim-cell { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; transition: all 0.2s; }
-.dim-cell.low { border-color: #fc8181; background: #fff5f5; }
-.dim-cell:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-.dim-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.dim-name { font-size: 14px; font-weight: 600; color: #2d3748; }
-.dim-num { font-size: 18px; font-weight: 700; color: var(--t); }
-.dim-cell.low .dim-num { color: #c53030; }
-.dim-bar { height: 6px; background: #edf2f7; border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
-.dim-bar-fill { height: 100%; background: linear-gradient(90deg, var(--ts) 0%, var(--te) 100%); transition: width 0.3s; }
-.dim-cell.low .dim-bar-fill { background: linear-gradient(90deg, #fc8181 0%, #f56565 100%); }
-.dim-types { display: flex; flex-wrap: wrap; gap: 3px; }
-.dim-tip-type { font-size: 10px; padding: 1px 5px; border-radius: 3px; opacity: 0.85; }
-@media (max-width: 640px) { .dim-grid { grid-template-columns: repeat(2, 1fr); } }
-.theme-month-card h2 { color: #553c9a; }
-.theme-month-card a { color: var(--t); }
-.reseed-today-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 12px; background: linear-gradient(135deg, rgba(102,126,234,0.06) 0%, rgba(118,75,162,0.02) 100%); border: 1px dashed rgba(102,126,234,0.3); border-radius: 8px; }
-.btn-reseed-today { padding: 6px 14px; background: #fff; color: var(--t); border: 1px solid var(--t); border-radius: 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
-.btn-reseed-today:hover { background: var(--t); color: #fff; }
-.btn-skip-slot { margin-left: 8px; padding: 3px 10px; background: transparent; color: #a0aec0; border: 1px solid #cbd5e0; border-radius: 12px; font-size: 11px; cursor: pointer; }
-.btn-skip-slot:hover { background: #fed7d7; color: #c53030; border-color: #fc8181; }
-.btn-reseed-today:disabled { opacity: 0.6; cursor: not-allowed; }
-.reseed-hint { font-size: 11px; }
-/* D42-E: 明日建议卡片 */
-.day-suggestion-card { background: linear-gradient(135deg, rgba(102,126,234,0.05) 0%, rgba(118,75,162,0.08) 100%); border-color: rgba(102,126,234,0.25); }
-.ds-theme-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; font-size: 13px; }
-.ds-phase { font-size: 12px; }
-.ds-day-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; background: #fff; border: 1px dashed rgba(102,126,234,0.3); border-radius: 8px; font-size: 13px; }
-.ds-day-top-type { padding: 3px 14px; border-radius: 16px; font-weight: 700; font-size: 14px; }
-.ds-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-.ds-slot { padding: 10px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
-.ds-slot-time { font-size: 12px; color: #718096; font-weight: 600; margin-bottom: 6px; }
-.ds-slot-type { display: inline-block; padding: 4px 12px; border-radius: 14px; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
-.ds-weight { font-size: 11px; font-weight: 500; opacity: 0.85; margin-left: 4px; }
-.ds-slot-alt { font-size: 11px; color: #718096; margin-bottom: 6px; }
-.ds-alt-type { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 11px; margin: 0 2px; }
-.ds-slot-hint { font-size: 11px; color: #4a5568; line-height: 1.5; margin-bottom: 6px; padding: 4px 0; border-top: 1px dashed #edf2f7; }
-.ds-slot-dims { display: flex; gap: 4px; flex-wrap: wrap; }
-.ds-dim { font-size: 10px; padding: 1px 6px; background: #edf2f7; color: #4a5568; border-radius: 8px; }
-@media (max-width: 640px) { .ds-slots { grid-template-columns: 1fr; } }
-.addon-form { margin-top: 12px; }
-.addon-form label { display: block; font-size: 13px; color: #4a5568; margin-bottom: 6px; font-weight: 500; }
-.addon-form textarea {
-  width: 100%; padding: 10px 12px; border: 1px solid #e2e8f0;
-  border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical;
-}
-.addon-form textarea:focus { outline: none; border-color: var(--t); box-shadow: 0 0 0 3px rgba(var(--ts-rgb), 0.1); }
-.form-actions { display: flex; gap: 8px; margin-top: 10px; }
-.btn-primary, .btn-success {
-  padding: 8px 16px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
-}
-.btn-primary { background: linear-gradient(135deg, var(--ts) 0%, var(--te) 100%); color: #fff; }
-.btn-primary:hover { opacity: 0.92; }
-.btn-success { background: #48bb78; color: #fff; }
-.btn-success:hover { background: #38a169; }
-.intros { display: flex; flex-direction: column; gap: 8px; }
-.intro {
-  border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px;
-}
-.intro.empty { background: #f7fafc; }
-.intro-label { font-weight: 500; color: #2d3748; }
-.intro-body { margin-top: 8px; color: #4a5568; font-size: 14px; white-space: pre-wrap; }
-.case { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
-.case summary { cursor: pointer; font-weight: 500; }
-.case-body { margin-top: 8px; font-size: 14px; color: #4a5568; }
-.case-body p { margin-bottom: 4px; }
-.case-body blockquote { border-left: 3px solid #cbd5e0; padding-left: 12px; margin: 8px 0; color: #2d3748; font-style: italic; }
-.quotes { list-style: none; padding: 0; }
-.quotes li { padding: 6px 0; border-bottom: 1px dashed #edf2f7; font-size: 14px; }
-.quotes li:last-child { border-bottom: none; }
-.cat { display: inline-block; padding: 1px 6px; background: #edf2f7; color: #4a5568; border-radius: 4px; font-size: 11px; margin-left: 6px; }
-.formula { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
-.formula summary { cursor: pointer; font-weight: 500; }
-.formula pre { white-space: pre-wrap; font-size: 13px; color: #4a5568; margin-top: 8px; padding: 8px; background: #f7fafc; border-radius: 4px; }
-.public { background: #fefcbf1a; border-color: #f6e05e; }
-.formulas-public { padding-left: 20px; }
-.formulas-public li { margin-bottom: 6px; font-size: 14px; color: #4a5568; }
-.formulas-public strong { color: #2d3748; }
-.muted { color: #a0aec0; font-size: 13px; }
-.admin-only { margin-top: 12px; }
 
-/* AI 帮写区块 */
-.ai-card { background: linear-gradient(135deg, rgba(var(--ts-rgb), 0.04) 0%, rgba(var(--ts-rgb), 0.01) 100%); border-color: var(--t); }
-.ai-tag { padding: 2px 8px; background: var(--t); color: #fff; border-radius: 4px; font-size: 12px; font-weight: 600; }
-.ai-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-.btn-ai {
-  padding: 10px 20px; background: linear-gradient(135deg, var(--ts) 0%, var(--te) 100%);
-  color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer;
-  box-shadow: 0 2px 8px rgba(var(--ts-rgb), 0.3);
-}
-.btn-ai:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(var(--ts-rgb), 0.4); }
-.btn-ai:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-.ai-drafts { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
-.draft-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-.draft-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.draft-num { padding: 2px 8px; background: var(--t); color: #fff; border-radius: 4px; font-size: 12px; font-weight: 600; }
-.draft-len { color: #a0aec0; font-size: 12px; }
-.draft-text { font-family: inherit; font-size: 14px; color: #2d3748; line-height: 1.6; white-space: pre-wrap; word-break: break-word; background: #f7fafc; padding: 10px 12px; border-radius: 6px; margin-bottom: 10px; max-height: 200px; overflow-y: auto; }
-.draft-actions { display: flex; gap: 8px; }
-.btn-copy { flex: 1; padding: 8px 12px; background: var(--t); color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
-.btn-copy:hover { opacity: 0.92; }
-.btn-mark { flex: 1; padding: 8px 12px; background: #48bb78; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
-.btn-mark:hover { background: #38a169; }
-@media (max-width: 640px) {
-  .draft-text { max-height: 150px; }
-  .draft-actions { flex-direction: column; }
-}
-.admin-only details { background: #f7fafc; padding: 8px 12px; border-radius: 6px; }
-.admin-only code { background: #edf2f7; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
-`
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

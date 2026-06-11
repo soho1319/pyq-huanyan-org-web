@@ -6,7 +6,6 @@
 
 import { getCurrentUser } from "../lib/auth"
 import { loadUserTheme, themeCssVar } from "../lib/theme"
-import { POST_TYPES } from "../lib/schedule-constants"
 
 interface User { id: string; username: string; display_name: string | null }
 

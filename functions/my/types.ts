@@ -1,74 +1,74 @@
 // ============================================
-// /my/types
-// 自定义 7 种 post_type 按钮颜色 + UI 主题色
+// /my/dims（D55 彻底切换：颜色按 7 维度）
+// 自定义 7 维度按钮颜色 + UI 主题色
 //
 // GET   渲染 7 个颜色选择器 + 2 个主题色
 // POST  保存到 user_settings
 // ============================================
 
 import { DEFAULT_THEME, loadUserTheme, themeCssVar } from "../lib/theme"
-import { POST_TYPES, SLOTS, SLOT_IDS, loadEnabledSlots } from "../lib/schedule-constants"
+import { DIMS, DIM_IDS, SLOTS, SLOT_IDS, loadEnabledSlots, type Dim, type SlotId } from "../lib/schedule-constants"
 
 interface User { id: string; username: string; display_name: string | null }
 
-const DEFAULT_COLORS: Record<string, { bg: string; fg: string }> = {
-  "干货": { bg: "#ebf4ff", fg: "#2c5282" },
-  "生活": { bg: "#fef5e7", fg: "#c05621" },
-  "客户": { bg: "#e6fffa", fg: "#234e52" },
-  "互动": { bg: "#faf5ff", fg: "#553c9a" },
-  "软广": { bg: "#fff5f5", fg: "#c53030" },
-  "复盘": { bg: "#f0fff4", fg: "#22543d" },
-  "休息": { bg: "#edf2f7", fg: "#4a5568" },
+// D55: 7 维度默认色（每维度用课程术语的语义化配色）
+const DEFAULT_COLORS: Record<Dim, { bg: string; fg: string; label: string }> = {
+  A: { bg: "#fef5e7", fg: "#c05621", label: "美学" },      // 观赏价值 → 暖橙
+  B: { bg: "#ebf4ff", fg: "#2c5282", label: "专业" },      // 专业价值 → 蓝
+  C: { bg: "#faf5ff", fg: "#553c9a", label: "情绪" },      // 情绪价值 → 紫
+  D: { bg: "#e6fffa", fg: "#234e52", label: "身份" },      // 身份维度 → 青
+  E: { bg: "#f0fff4", fg: "#22543d", label: "生活" },      // 生活维度 → 绿
+  F: { bg: "#fff5f5", fg: "#c53030", label: "思想" },      // 思想维度 → 红
+  G: { bg: "#fdf4ff", fg: "#86198f", label: "关系" },      // 关系维度 → 玫紫
 }
 
-const TYPE_ORDER = POST_TYPES  // D29: 从 lib/schedule-constants 复用
+const DIM_ORDER = DIM_IDS  // D55: 从 lib/schedule-constants 复用
 
-const TYPE_TIPS: Record<string, string> = {
-  "干货": "建立专业感",
-  "生活": "建立真实感",
-  "客户": "建立信任感",
-  "互动": "激活评论区",
-  "软广": "种草不硬广",
-  "复盘": "建立反思感",
-  "休息": "放空一下",
+// D55: 5 段（早/午/傍/晚/夜）勾选
+const slotLabelMap: Record<SlotId, string> = {
+  morning: "早 8:00",
+  noon:    "午 12:30",
+  evening: "傍晚 18:00",
+  late:    "晚 20:00",
+  night:   "夜 22:30",
 }
 
-// 每种类型 3 个快选色（深浅梯度）
-const TYPE_PRESETS: Record<string, Array<{ bg: string; fg: string; label: string }>> = {
-  "干货": [
-    { bg: "#ebf4ff", fg: "#2c5282", label: "浅" },
-    { bg: "#90cdf4", fg: "#1a365d", label: "中" },
-    { bg: "#2b6cb0", fg: "#ffffff", label: "深" },
-  ],
-  "生活": [
+// D55: 每维度 3 个快选色（深浅梯度）
+const DIM_PRESETS: Record<Dim, Array<{ bg: string; fg: string; label: string }>> = {
+  A: [
     { bg: "#fef5e7", fg: "#c05621", label: "浅" },
     { bg: "#fbd38d", fg: "#7b341e", label: "中" },
     { bg: "#c05621", fg: "#ffffff", label: "深" },
   ],
-  "客户": [
-    { bg: "#e6fffa", fg: "#234e52", label: "浅" },
-    { bg: "#81e6d9", fg: "#1d4044", label: "中" },
-    { bg: "#2c7a7b", fg: "#ffffff", label: "深" },
+  B: [
+    { bg: "#ebf4ff", fg: "#2c5282", label: "浅" },
+    { bg: "#90cdf4", fg: "#1a365d", label: "中" },
+    { bg: "#2b6cb0", fg: "#ffffff", label: "深" },
   ],
-  "互动": [
+  C: [
     { bg: "#faf5ff", fg: "#553c9a", label: "浅" },
     { bg: "#d6bcfa", fg: "#44337a", label: "中" },
     { bg: "#6b46c1", fg: "#ffffff", label: "深" },
   ],
-  "软广": [
-    { bg: "#fff5f5", fg: "#c53030", label: "浅" },
-    { bg: "#fc8181", fg: "#742a2a", label: "中" },
-    { bg: "#c53030", fg: "#ffffff", label: "深" },
+  D: [
+    { bg: "#e6fffa", fg: "#234e52", label: "浅" },
+    { bg: "#81e6d9", fg: "#1d4044", label: "中" },
+    { bg: "#2c7a7b", fg: "#ffffff", label: "深" },
   ],
-  "复盘": [
+  E: [
     { bg: "#f0fff4", fg: "#22543d", label: "浅" },
     { bg: "#9ae6b4", fg: "#1c4532", label: "中" },
     { bg: "#276749", fg: "#ffffff", label: "深" },
   ],
-  "休息": [
-    { bg: "#edf2f7", fg: "#4a5568", label: "浅" },
-    { bg: "#cbd5e0", fg: "#2d3748", label: "中" },
-    { bg: "#4a5568", fg: "#ffffff", label: "深" },
+  F: [
+    { bg: "#fff5f5", fg: "#c53030", label: "浅" },
+    { bg: "#fc8181", fg: "#742a2a", label: "中" },
+    { bg: "#c53030", fg: "#ffffff", label: "深" },
+  ],
+  G: [
+    { bg: "#fdf4ff", fg: "#86198f", label: "浅" },
+    { bg: "#d8b4fe", fg: "#6b21a8", label: "中" },
+    { bg: "#86198f", fg: "#ffffff", label: "深" },
   ],
 }
 
@@ -88,20 +88,19 @@ function isHex(s: string): boolean {
 }
 
 // ★ swatch GET 链接的写入：检测 url 里 set_/bulk_set/set_theme，apply 后写 D1
-// 返回 'saved' 表示有更新；返回 null 表示只是普通 GET 渲染
 async function applySwatchFromQuery(env: { DB?: D1Database }, userId: string, url: URL): Promise<string | null> {
   if (!env.DB) return null
 
   const setTheme = url.searchParams.get("set_theme")
   const bulkSet = url.searchParams.get("bulk_set")
-  // 检测任意 set_<type>
-  let swatchSet: { type: string; bg: string; fg: string } | null = null
-  for (const t of TYPE_ORDER) {
-    const v = url.searchParams.get(`set_${t}`)
+  // 检测任意 set_<dim>
+  let swatchSet: { dim: Dim; bg: string; fg: string } | null = null
+  for (const d of DIM_ORDER) {
+    const v = url.searchParams.get(`set_${d}`)
     if (v) {
       const parts = v.split(",")
       if (parts.length === 2 && isHex(parts[0]) && isHex(parts[1])) {
-        swatchSet = { type: t, bg: parts[0], fg: parts[1] }
+        swatchSet = { dim: d, bg: parts[0], fg: parts[1] }
         break
       }
     }
@@ -111,27 +110,31 @@ async function applySwatchFromQuery(env: { DB?: D1Database }, userId: string, ur
 
   // 读当前
   const row = await env.DB.prepare(
-    "SELECT type_colors, theme_start, theme_end FROM user_settings WHERE user_id = ?"
-  ).bind(userId).first<{ type_colors: string; theme_start: string; theme_end: string }>()
-  let colors: Record<string, { bg: string; fg: string }> = { ...DEFAULT_COLORS }
+    "SELECT dim_colors, theme_start, theme_end FROM user_settings WHERE user_id = ?"
+  ).bind(userId).first<{ dim_colors: string; theme_start: string; theme_end: string }>()
+  let colors: Record<string, { bg: string; fg: string }> = {}
+  for (const d of DIM_ORDER) colors[d] = { ...DEFAULT_COLORS[d] }
   let themeStart = DEFAULT_THEME.start
   let themeEnd = DEFAULT_THEME.end
   if (row) {
-    try { colors = { ...DEFAULT_COLORS, ...JSON.parse(row.type_colors) } } catch {}
+    try {
+      const stored = JSON.parse(row.dim_colors || "{}")
+      for (const d of DIM_ORDER) colors[d] = { ...DEFAULT_COLORS[d], ...(stored[d] || {}) }
+    } catch {}
     themeStart = row.theme_start || DEFAULT_THEME.start
     themeEnd = row.theme_end || DEFAULT_THEME.end
   }
 
   // apply
   if (swatchSet) {
-    colors[swatchSet.type] = { bg: swatchSet.bg, fg: swatchSet.fg }
+    colors[swatchSet.dim] = { bg: swatchSet.bg, fg: swatchSet.fg }
   }
   if (bulkSet) {
     const shadeIdx = bulkSet === "all_light" ? 0 : bulkSet === "all_mid" ? 1 : bulkSet === "all_deep" ? 2 : -1
     if (shadeIdx >= 0) {
-      for (const t of TYPE_ORDER) {
-        const preset = TYPE_PRESETS[t]?.[shadeIdx]
-        if (preset) colors[t] = { bg: preset.bg, fg: preset.fg }
+      for (const d of DIM_ORDER) {
+        const preset = DIM_PRESETS[d]?.[shadeIdx]
+        if (preset) colors[d] = { bg: preset.bg, fg: preset.fg }
       }
     }
   }
@@ -144,10 +147,10 @@ async function applySwatchFromQuery(env: { DB?: D1Database }, userId: string, ur
   }
 
   await env.DB.prepare(
-    `INSERT INTO user_settings (user_id, type_colors, theme_start, theme_end, updated_at)
+    `INSERT INTO user_settings (user_id, dim_colors, theme_start, theme_end, updated_at)
      VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET
-       type_colors = excluded.type_colors,
+       dim_colors = excluded.dim_colors,
        theme_start = excluded.theme_start,
        theme_end = excluded.theme_end,
        updated_at = excluded.updated_at`
@@ -162,7 +165,7 @@ function renderPage(currentColors: Record<string, string>, currentTheme: { start
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>类型颜色 · pyq</title>
+<title>维度颜色 · pyq</title>
 ${themeCssVar({ start: currentTheme.start, end: currentTheme.end, solid: currentTheme.start })}
 <style>${styles}</style>
 </head>
@@ -183,27 +186,27 @@ ${themeCssVar({ start: currentTheme.start, end: currentTheme.end, solid: current
     <a href="/my/quotes">💎 金句库</a>
     <a href="/my/formulas">✍️ 公式填空</a>
     <a href="/calendar">🗓 日历</a>
-    <a href="/my/types" class="active">🎨 颜色</a>
+    <a href="/my/dims" class="active">🎨 维度颜色</a>
   </nav>
 
   <main>
     ${msg ? `<div class="flash ${msg.startsWith('✗') ? 'flash-err' : 'flash-ok'}">${escapeHtml(msg)}</div>` : ''}
 
-    <h1>🎨 颜色 & 主题</h1>
-    <p class="muted">每个 post_type 按钮 + UI 主题色。改了立刻在 <a href="/today">今日</a> 和 <a href="/calendar">日历</a> 生效。</p>
+    <h1>🎨 维度颜色 & 主题</h1>
+    <p class="muted">每个 <strong>7 维度</strong>（A 观赏/B 专业/C 情绪/D 身份/E 生活/F 思想/G 关系）按钮 + UI 主题色。改了立刻在 <a href="/today">今日</a> 和 <a href="/calendar">日历</a> 生效。</p>
 
-    <form method="POST" action="/my/types" class="form">
+    <form method="POST" action="/my/dims" class="form">
       <h2>🖼️ UI 主题色</h2>
       <p class="muted">按钮、顶部 banner、导航激活态都用这个渐变。默认紫色 (#667eea → #764ba2)。</p>
       <div class="theme-presets">
         <span class="preset-label">常用（点直接保存）：</span>
-        <a href="/my/types?set_theme=%23667eea%2C%23764ba2" class="theme-swatch" style="background:linear-gradient(135deg,#667eea,#764ba2)" title="紫"></a>
-        <a href="/my/types?set_theme=%234facfe%2C%2300f2fe" class="theme-swatch" style="background:linear-gradient(135deg,#4facfe,#00f2fe)" title="蓝"></a>
-        <a href="/my/types?set_theme=%2343e97b%2C%2338f9d7" class="theme-swatch" style="background:linear-gradient(135deg,#43e97b,#38f9d7)" title="绿"></a>
-        <a href="/my/types?set_theme=%23fa709a%2C%23fee140" class="theme-swatch" style="background:linear-gradient(135deg,#fa709a,#fee140)" title="粉"></a>
-        <a href="/my/types?set_theme=%23ff9a9e%2C%23fad0c4" class="theme-swatch" style="background:linear-gradient(135deg,#ff9a9e,#fad0c4)" title="桃"></a>
-        <a href="/my/types?set_theme=%23f5af19%2C%23c77700" class="theme-swatch" style="background:linear-gradient(135deg,#f5af19,#c77700)" title="金"></a>
-        <a href="/my/types?set_theme=%232c3e50%2C%234ca1af" class="theme-swatch" style="background:linear-gradient(135deg,#2c3e50,#4ca1af)" title="深"></a>
+        <a href="/my/dims?set_theme=%23667eea%2C%23764ba2" class="theme-swatch" style="background:linear-gradient(135deg,#667eea,#764ba2)" title="紫"></a>
+        <a href="/my/dims?set_theme=%234facfe%2C%2300f2fe" class="theme-swatch" style="background:linear-gradient(135deg,#4facfe,#00f2fe)" title="蓝"></a>
+        <a href="/my/dims?set_theme=%2343e97b%2C%2338f9d7" class="theme-swatch" style="background:linear-gradient(135deg,#43e97b,#38f9d7)" title="绿"></a>
+        <a href="/my/dims?set_theme=%23fa709a%2C%23fee140" class="theme-swatch" style="background:linear-gradient(135deg,#fa709a,#fee140)" title="粉"></a>
+        <a href="/my/dims?set_theme=%23ff9a9e%2C%23fad0c4" class="theme-swatch" style="background:linear-gradient(135deg,#ff9a9e,#fad0c4)" title="桃"></a>
+        <a href="/my/dims?set_theme=%23f5af19%2C%23c77700" class="theme-swatch" style="background:linear-gradient(135deg,#f5af19,#c77700)" title="金"></a>
+        <a href="/my/dims?set_theme=%232c3e50%2C%234ca1af" class="theme-swatch" style="background:linear-gradient(135deg,#2c3e50,#4ca1af)" title="深"></a>
       </div>
       <div class="theme-row">
         <label>
@@ -219,8 +222,8 @@ ${themeCssVar({ start: currentTheme.start, end: currentTheme.end, solid: current
         </div>
       </div>
 
-      <h2>⏰ 每天发几条 + 几段</h2>
-      <p class="muted">4 段固定时间：早 8:00 / 午 12:30 / 晚 20:00 / 夜 22:30。勾哪几段就发哪几段；不勾的时段不排期、不发。</p>
+      <h2>⏰ 5 段勾选</h2>
+      <p class="muted">5 段固定时间：早 8:00 / 午 12:30 / 傍晚 18:00 / 晚 20:00 / 夜 22:30。勾哪几段就发哪几段；不勾的时段不排期、不发。</p>
       <div class="slot-row">
         ${SLOTS.map(s => `
           <label class="slot-cb">
@@ -230,43 +233,43 @@ ${themeCssVar({ start: currentTheme.start, end: currentTheme.end, solid: current
           </label>
         `).join('')}
       </div>
-      <p class="muted">单日可改：到 <a href="/calendar">📅 日历</a> 点某天 → 4 段独立编辑</p>
+      <p class="muted">单日可改：到 <a href="/calendar">📅 日历</a> 点某天 → 5 段独立编辑</p>
 
-      <h2>🏷️ 7 种类型颜色</h2>
+      <h2>🏷️ 7 维度颜色</h2>
 
       <div class="bulk-presets">
         <span class="preset-label">批量改（点直接保存）：</span>
-        <a href="/my/types?bulk_set=all_light" class="bulk-btn" title="所有类型变浅色">全部变浅</a>
-        <a href="/my/types?bulk_set=all_mid" class="bulk-btn" title="所有类型变中等深度">全部变中</a>
-        <a href="/my/types?bulk_set=all_deep" class="bulk-btn" title="所有类型变深色">全部变深</a>
+        <a href="/my/dims?bulk_set=all_light" class="bulk-btn" title="所有维度变浅色">全部变浅</a>
+        <a href="/my/dims?bulk_set=all_mid" class="bulk-btn" title="所有维度变中等深度">全部变中</a>
+        <a href="/my/dims?bulk_set=all_deep" class="bulk-btn" title="所有维度变深色">全部变深</a>
       </div>
 
-      ${TYPE_ORDER.map(t => {
-        const def = DEFAULT_COLORS[t]
-        // currentColors[t] 可能是 string（旧格式）或 {bg,fg} 对象（D1 默认格式）
-        const stored = currentColors[t]
+      ${DIM_ORDER.map(d => {
+        const def = DEFAULT_COLORS[d]
+        const dimMeta = DIMS.find(x => x.id === d)
+        const stored = currentColors[d]
         const current = (typeof stored === 'object' && stored !== null) ? stored.bg : (stored || def.bg)
         const currentFg = (typeof stored === 'object' && stored !== null) ? stored.fg : def.fg
-        const presets = TYPE_PRESETS[t] || []
+        const presets = DIM_PRESETS[d] || []
         return `
         <div class="type-row">
           <div class="type-label">
-            <strong>${t}</strong>
-            <span class="muted">${TYPE_TIPS[t]}</span>
+            <strong>${d} ${escapeHtml(dimMeta?.name || d)}</strong>
+            <span class="muted">${escapeHtml(dimMeta?.desc || '')}</span>
           </div>
           <div class="color-pickers">
             <label>
               <span>背景</span>
-              <input type="color" name="bg_${t}" value="${current}" class="color-input">
+              <input type="color" name="bg_${d}" value="${current}" class="color-input">
             </label>
             <label>
               <span>文字</span>
-              <input type="color" name="fg_${t}" value="${currentFg}" class="color-input">
+              <input type="color" name="fg_${d}" value="${currentFg}" class="color-input">
             </label>
-            <span class="preview" style="background:${current};color:${currentFg}" data-preview="${t}">${t}</span>
+            <span class="preview" style="background:${current};color:${currentFg}" data-preview="${d}">${d}</span>
           </div>
           <div class="type-presets">
-            ${presets.map(p => `<a href="/my/types?set_${encodeURIComponent(t)}=${encodeURIComponent(p.bg + ',' + p.fg)}" class="type-swatch" style="background:${p.bg};color:${p.fg}" title="${t} ${p.label}">${p.label}</a>`).join('')}
+            ${presets.map(p => `<a href="/my/dims?set_${d}=${encodeURIComponent(p.bg + ',' + p.fg)}" class="type-swatch" style="background:${p.bg};color:${p.fg}" title="${d} ${p.label}">${p.label}</a>`).join('')}
           </div>
         </div>`
       }).join('')}
@@ -276,28 +279,28 @@ ${themeCssVar({ start: currentTheme.start, end: currentTheme.end, solid: current
       <div class="weekday-grid">
         <div class="wd-col">
           <h3>早 (周一-三)</h3>
-          ${POST_TYPES.map(t => `
+          ${DIM_ORDER.map(d => `
             <label class="wd-row">
-              <span>${t}</span>
-              <input type="number" name="weekday_early_${t}" min="0" max="1" step="0.05" value="${(weekdayWeights?.early[t] ?? WEEKDAY_PHASE_WEIGHTS.early[t]).toFixed(2)}">
+              <span>${d}</span>
+              <input type="number" name="weekday_early_${d}" min="0" max="1" step="0.05" value="${(weekdayWeights?.early[d] ?? 0.14).toFixed(2)}">
             </label>
           `).join('')}
         </div>
         <div class="wd-col">
           <h3>中 (周四-五)</h3>
-          ${POST_TYPES.map(t => `
+          ${DIM_ORDER.map(d => `
             <label class="wd-row">
-              <span>${t}</span>
-              <input type="number" name="weekday_mid_${t}" min="0" max="1" step="0.05" value="${(weekdayWeights?.mid[t] ?? WEEKDAY_PHASE_WEIGHTS.mid[t]).toFixed(2)}">
+              <span>${d}</span>
+              <input type="number" name="weekday_mid_${d}" min="0" max="1" step="0.05" value="${(weekdayWeights?.mid[d] ?? 0.14).toFixed(2)}">
             </label>
           `).join('')}
         </div>
         <div class="wd-col">
           <h3>周末 (周六-日)</h3>
-          ${POST_TYPES.map(t => `
+          ${DIM_ORDER.map(d => `
             <label class="wd-row">
-              <span>${t}</span>
-              <input type="number" name="weekday_weekend_${t}" min="0" max="1" step="0.05" value="${(weekdayWeights?.weekend[t] ?? WEEKDAY_PHASE_WEIGHTS.weekend[t]).toFixed(2)}">
+              <span>${d}</span>
+              <input type="number" name="weekday_weekend_${d}" min="0" max="1" step="0.05" value="${(weekdayWeights?.weekend[d] ?? 0.14).toFixed(2)}">
             </label>
           `).join('')}
         </div>
@@ -328,11 +331,11 @@ export async function onRequestGet(ctx: {
 
   const url = new URL(ctx.request.url)
 
-  // ★ 兼容 swatch 的 GET 链接：/my/types?set_干货=%23xxx,%23yyy 或 ?bulk_set=all_light
-  // 检测到 → 写入 D1 → 重定向到 /my/types?saved=1
+  // ★ 兼容 /my/dims?set_xxx=%23xxx,%23yyy 或 ?bulk_set=all_light
+  // D55: 路由改到 /my/dims（替代旧的 /my/types）
   const swatchAction = await applySwatchFromQuery(ctx.env, user.id, url)
   if (swatchAction) {
-    return Response.redirect(getOrigin(ctx.request) + `/my/types?saved=1`, 302)
+    return Response.redirect(getOrigin(ctx.request) + `/my/dims?saved=1`, 302)
   }
 
   const saved = url.searchParams.get("saved")
@@ -341,14 +344,13 @@ export async function onRequestGet(ctx: {
   if (saved === "reset") msg = "✓ 已恢复默认"
 
   const row = await ctx.env.DB.prepare(
-    "SELECT type_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json FROM user_settings WHERE user_id = ?"
-  ).bind(user.id).first<{ type_colors: string; theme_start: string; theme_end: string; default_slots_per_day: number | null; slot_config_json: string | null; weekday_weights_json: string | null }>()
+    "SELECT dim_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json FROM user_settings WHERE user_id = ?"
+  ).bind(user.id).first<{ dim_colors: string; theme_start: string; theme_end: string; default_slots_per_day: number | null; slot_config_json: string | null; weekday_weights_json: string | null }>()
 
   let currentColors: Record<string, string> = {}
   let currentTheme = { start: DEFAULT_THEME.start, end: DEFAULT_THEME.end }
   let defaultSlotsPerDay = 1
   let enabledSlotsFromJson: SlotId[] | null = null
-  // D37: 加载 weekday weights（用户自定 → D36 默认）
   const { WEEKDAY_PHASE_WEIGHTS } = await import("../lib/schedule-constants")
   let weekdayWeights = {
     early:   { ...WEEKDAY_PHASE_WEIGHTS.early },
@@ -356,13 +358,18 @@ export async function onRequestGet(ctx: {
     weekend: { ...WEEKDAY_PHASE_WEIGHTS.weekend },
   }
   if (row) {
-    try { currentColors = JSON.parse(row.type_colors) } catch {}
+    try {
+      const stored = JSON.parse(row.dim_colors || "{}")
+      for (const d of DIM_ORDER) {
+        const v = stored[d]
+        if (v) currentColors[d] = typeof v === 'string' ? v : v.bg
+      }
+    } catch {}
     currentTheme = {
       start: row.theme_start || DEFAULT_THEME.start,
       end: row.theme_end || DEFAULT_THEME.end,
     }
     defaultSlotsPerDay = row.default_slots_per_day || 1
-    // D50: 从 slot_config_json._default 读用户实际勾选的段
     if (row.slot_config_json) {
       try {
         const cfg = JSON.parse(row.slot_config_json)
@@ -384,7 +391,6 @@ export async function onRequestGet(ctx: {
       } catch {}
     }
   }
-  // D50: 优先用 _default 数组（用户实际勾了哪几段），否则默认 4 段全勾（每天都要发）
   const enabledSlots = enabledSlotsFromJson ?? SLOTS.map(s => s.id)
   return renderPage(currentColors, currentTheme, user, msg, enabledSlots, weekdayWeights)
 }
@@ -406,16 +412,19 @@ export async function onRequestPost(ctx: {
   }
   const reset = form.get("reset")
 
-  // 先读当前/默认颜色（用来兜底）
-  const existingRow = await ctx.env.DB.prepare(
-    "SELECT type_colors, theme_start, theme_end, slot_config_json FROM user_settings WHERE user_id = ?"
-  ).bind(user.id).first<{ type_colors: string; theme_start: string; theme_end: string; slot_config_json: string | null }>()
-  let fallbackColors: Record<string, { bg: string; fg: string }> = { ...DEFAULT_COLORS }
+  // 先读当前/默认颜色
+  const existingRow = await ctx.DB.prepare(
+    "SELECT dim_colors, theme_start, theme_end, slot_config_json FROM user_settings WHERE user_id = ?"
+  ).bind(user.id).first<{ dim_colors: string; theme_start: string; theme_end: string; slot_config_json: string | null }>()
+  let fallbackColors: Record<string, { bg: string; fg: string }> = {}
+  for (const d of DIM_ORDER) fallbackColors[d] = { ...DEFAULT_COLORS[d] }
   let fallbackTheme = { start: DEFAULT_THEME.start, end: DEFAULT_THEME.end }
-  // D50: 保留 per-date 覆盖（slot_config_json 里除 _default 外的 key）
   let existingConfig: Record<string, unknown> = {}
   if (existingRow) {
-    try { fallbackColors = { ...DEFAULT_COLORS, ...JSON.parse(existingRow.type_colors) } } catch {}
+    try {
+      const stored = JSON.parse(existingRow.dim_colors || "{}")
+      for (const d of DIM_ORDER) fallbackColors[d] = { ...DEFAULT_COLORS[d], ...(stored[d] || {}) }
+    } catch {}
     if (existingRow.theme_start) fallbackTheme.start = existingRow.theme_start
     if (existingRow.theme_end) fallbackTheme.end = existingRow.theme_end
     if (existingRow.slot_config_json) {
@@ -426,52 +435,48 @@ export async function onRequestPost(ctx: {
   let colors: Record<string, { bg: string; fg: string }>
   let themeStart: string
   let themeEnd: string
-  let defaultSlotsPerDay = 1  // D29
-  let checkedSlots: SlotId[] = []  // D50: 用户实际勾了哪几段
+  let defaultSlotsPerDay = 1
+  let checkedSlots: SlotId[] = []
   if (reset) {
-    colors = DEFAULT_COLORS
+    colors = fallbackColors
+    for (const d of DIM_ORDER) colors[d] = { ...DEFAULT_COLORS[d] }
     themeStart = DEFAULT_THEME.start
     themeEnd = DEFAULT_THEME.end
     defaultSlotsPerDay = 1
   } else {
     colors = {}
-    // 1. 先从 form input 读（color picker 选的值，或当前已存值）
-    for (const t of TYPE_ORDER) {
-      const fallback = fallbackColors[t] || DEFAULT_COLORS[t]
-      const bg = String(form.get(`bg_${t}`) || "").trim()
-      const fg = String(form.get(`fg_${t}`) || "").trim()
-      colors[t] = {
+    for (const d of DIM_ORDER) {
+      const fallback = fallbackColors[d] || DEFAULT_COLORS[d]
+      const bg = String(form.get(`bg_${d}`) || "").trim()
+      const fg = String(form.get(`fg_${d}`) || "").trim()
+      colors[d] = {
         bg: isHex(bg) ? bg : fallback.bg,
         fg: isHex(fg) ? fg : fallback.fg,
       }
     }
-    // 2. 读 swatch 提交（点 swatch 时会带 set_<type>=bg,fg）
-    for (const t of TYPE_ORDER) {
-      const setVal = form.get(`set_${t}`)
+    for (const d of DIM_ORDER) {
+      const setVal = form.get(`set_${d}`)
       if (setVal) {
         const parts = String(setVal).split(",")
         if (parts.length === 2 && isHex(parts[0]) && isHex(parts[1])) {
-          colors[t] = { bg: parts[0], fg: parts[1] }
+          colors[d] = { bg: parts[0], fg: parts[1] }
         }
       }
     }
-    // 3. 批量改（点批量按钮时带 bulk_set=all_light/mid/deep）
     const bulkSet = form.get("bulk_set")
     if (bulkSet) {
       const shadeIdx = bulkSet === "all_light" ? 0 : bulkSet === "all_mid" ? 1 : bulkSet === "all_deep" ? 2 : -1
       if (shadeIdx >= 0) {
-        for (const t of TYPE_ORDER) {
-          const preset = TYPE_PRESETS[t]?.[shadeIdx]
-          if (preset) colors[t] = { bg: preset.bg, fg: preset.fg }
+        for (const d of DIM_ORDER) {
+          const preset = DIM_PRESETS[d]?.[shadeIdx]
+          if (preset) colors[d] = { bg: preset.bg, fg: preset.fg }
         }
       }
     }
-    // 4. 主题色
     const rawStart = String(form.get("theme_start") || "").trim()
     const rawEnd = String(form.get("theme_end") || "").trim()
     themeStart = isHex(rawStart) ? rawStart : fallbackTheme.start
     themeEnd = isHex(rawEnd) ? rawEnd : fallbackTheme.end
-    // 5. 主题 swatch
     const setTheme = form.get("set_theme")
     if (setTheme) {
       const parts = String(setTheme).split(",")
@@ -480,46 +485,40 @@ export async function onRequestPost(ctx: {
         themeEnd = parts[1]
       }
     }
-    // 6. D29 + D50: 4 段 checkbox 解析（按 SLOT_IDS 顺序，去重，限制 1-4）
-    //     D50: 真实存勾选的数组（_default），不再只是 N
     for (const sid of SLOT_IDS) {
       if (form.get(`slot_${sid}`)) checkedSlots.push(sid)
     }
-    if (checkedSlots.length === 0) checkedSlots = SLOTS.map(s => s.id)  // D50+: 0 勾 = 默认 4 段全发
+    if (checkedSlots.length === 0) checkedSlots = SLOTS.map(s => s.id)
     defaultSlotsPerDay = checkedSlots.length
   }
 
-  // D50: 合并 _default 到 slot_config_json（保留 per-date 覆盖）
   const newSlotConfig = { ...existingConfig, _default: checkedSlots }
   const slotConfigJson = JSON.stringify(newSlotConfig)
 
-  // D37: 周内 3 段配重（早/中/周末），从 form input 收
-  // form: weekday_early_干货=0.30, weekday_early_生活=0.30, weekday_mid_干货=0.15 ...
-  const { WEEKDAY_PHASE_WEIGHTS, POST_TYPES } = await import("../lib/schedule-constants")
+  const { WEEKDAY_PHASE_WEIGHTS } = await import("../lib/schedule-constants")
   const weekdayWeights = {
     early:   { ...WEEKDAY_PHASE_WEIGHTS.early },
     mid:     { ...WEEKDAY_PHASE_WEIGHTS.mid },
     weekend: { ...WEEKDAY_PHASE_WEIGHTS.weekend },
   }
   for (const phase of ['early', 'mid', 'weekend'] as const) {
-    for (const t of POST_TYPES) {
-      const v = form.get(`weekday_${phase}_${t}`)
+    for (const d of DIM_ORDER) {
+      const v = form.get(`weekday_${phase}_${d}`)
       if (v !== null && v !== '') {
         const n = parseFloat(String(v))
         if (!isNaN(n) && n >= 0) {
-          // 容差容许 0.0-1.0 之间
-          weekdayWeights[phase][t] = Math.min(1, Math.max(0, n))
+          weekdayWeights[phase][d] = Math.min(1, Math.max(0, n))
         }
       }
     }
   }
   const weekdayWeightsJson = JSON.stringify(weekdayWeights)
 
-  await ctx.env.DB.prepare(
-    `INSERT INTO user_settings (user_id, type_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json, updated_at)
+  await env.DB.prepare(
+    `INSERT INTO user_settings (user_id, dim_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET
-       type_colors = excluded.type_colors,
+       dim_colors = excluded.dim_colors,
        theme_start = excluded.theme_start,
        theme_end = excluded.theme_end,
        default_slots_per_day = excluded.default_slots_per_day,
@@ -529,23 +528,22 @@ export async function onRequestPost(ctx: {
   ).bind(user.id, JSON.stringify(colors), themeStart, themeEnd, defaultSlotsPerDay, slotConfigJson, weekdayWeightsJson, Date.now()).run()
 
   const suffix = reset ? "reset" : "1"
-  return Response.redirect(getOrigin(ctx.request) + `/my/types?saved=${suffix}`, 302)
+  return Response.redirect(getOrigin(ctx.request) + `/my/dims?saved=${suffix}`, 302)
 }
 
 const script = `
 document.querySelectorAll('.color-input').forEach(input => {
   input.addEventListener('input', () => {
-    const t = input.name.startsWith('bg_') ? input.name.slice(3) : input.name.slice(3)
-    const preview = document.querySelector('[data-preview="' + t + '"]')
-    const bgInput = document.querySelector('input[name="bg_' + t + '"]')
-    const fgInput = document.querySelector('input[name="fg_' + t + '"]')
+    const d = input.name.startsWith('bg_') ? input.name.slice(3) : input.name.slice(3)
+    const preview = document.querySelector('[data-preview="' + d + '"]')
+    const bgInput = document.querySelector('input[name="bg_' + d + '"]')
+    const fgInput = document.querySelector('input[name="fg_' + d + '"]')
     if (preview && bgInput && fgInput) {
       preview.style.background = bgInput.value
       preview.style.color = fgInput.value
     }
   })
 })
-// 主题色 live preview
 const themeStartInput = document.querySelector('input[name="theme_start"]')
 const themeEndInput = document.querySelector('input[name="theme_end"]')
 const themePreview = document.getElementById('themePreview')
@@ -556,11 +554,6 @@ function updateThemePreview() {
 }
 if (themeStartInput) themeStartInput.addEventListener('input', updateThemePreview)
 if (themeEndInput) themeEndInput.addEventListener('input', updateThemePreview)
-
-// 所有 swatch 现在都是 <a href="/my/types?set_xxx=bg,fg"> GET 链接
-// 点一下直接 GET 改色，0 JS 依赖，0 form 提交风险
-
-// JS 只保留：input 颜色 picker 的实时预览
 `
 
 const styles = `
@@ -569,7 +562,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 .topbar { position: sticky; top: 0; z-index: 10; background: rgba(255,255,255,0.95); backdrop-filter: blur(8px); border-bottom: 1px solid #e2e8f0; }
 .topbar-inner { max-width: 760px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; }
 .brand { font-weight: 700; font-size: 16px; text-decoration: none; color: #1a202c; }
-.user { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+.user { display: flex; align-items: center; gap: 12px; font-size: 13px; }
 .user-name { color: #4a5568; }
 .logout-btn { padding: 4px 10px; background: #fff; color: #c53030; border: 1px solid #fc8181; border-radius: 16px; text-decoration: none; font-size: 12px; }
 .subnav { max-width: 760px; margin: 0 auto; display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 20px 0; }
@@ -600,7 +593,7 @@ h2 { font-size: 18px; margin: 24px 0 8px; color: #2d3748; }
 @media (max-width: 640px) { .theme-row { flex-direction: column; align-items: flex-start; } }
 .type-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #edf2f7; gap: 16px; }
 .type-row:last-of-type { border-bottom: none; }
-.type-label { display: flex; flex-direction: column; gap: 2px; min-width: 80px; }
+.type-label { display: flex; flex-direction: column; gap: 2px; min-width: 160px; }
 .type-label strong { color: #2d3748; font-size: 16px; }
 .type-label .muted { font-size: 12px; margin: 0; }
 .color-pickers { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

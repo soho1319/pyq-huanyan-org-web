@@ -8,8 +8,10 @@
 
 import { getCurrentUser } from "../lib/auth"
 import { loadUserTheme, themeCssVar } from "../lib/theme"
-import { DIMENSION_TYPE_MAP, reverseDimensionMap, getMonthlyPhase, getWeeklyTheme, ymd, addDays } from "../lib/schedule-constants"
+import { DIM_IDS, getMonthlyPhase, getWeeklyTheme, ymd, addDays, type Dim } from "../lib/schedule-constants"
 import { startOfWeek } from "../lib/weekly"
+
+const OLD_TYPE_TO_DIM_DASH: Record<string, Dim> = { '干货': 'F', '生活': 'E', '客户': 'B', '互动': 'G', '软广': 'C', '复盘': 'F', '休息': 'E' }
 
 interface User { id: string; username: string; display_name: string | null }
 
@@ -32,31 +34,29 @@ export async function onRequestGet(ctx: {
   const [y, m] = yearMonth.split('-').map(Number)
   const nextMonth = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`
 
-  // 本月所有 schedule 行
+  // 本月所有 schedule 行（D55: 加 dim 字段）
   const rows = await ctx.env.DB.prepare(
-    "SELECT date, post_type, status, slot FROM schedule WHERE user_id = ? AND date >= ? AND date < ?"
-  ).bind(user.id, monthStart, nextMonth).all<{ date: string; post_type: string; status: string; slot: string }>()
+    "SELECT date, post_type, dim, status, slot FROM schedule WHERE user_id = ? AND date >= ? AND date < ?"
+  ).bind(user.id, monthStart, nextMonth).all<{ date: string; post_type: string; dim: string | null; status: string; slot: string }>()
 
-  // 7 维度统计（已发/总排）
+  // 7 维度统计（已发/总排，D55 直接按 dim 字段）
   const dimTotal: Record<string, number> = {}
   const dimPosted: Record<string, number> = {}
-  for (const dim of Object.keys(DIMENSION_TYPE_MAP)) {
+  for (const dim of DIM_IDS) {
     dimTotal[dim] = 0
     dimPosted[dim] = 0
   }
   for (const r of rows.results || []) {
-    const dims = reverseDimensionMap(r.post_type)
-    for (const dim of dims) {
-      dimTotal[dim] = (dimTotal[dim] || 0) + 1
-      if (r.status === 'posted') dimPosted[dim] = (dimPosted[dim] || 0) + 1
-    }
+    // D55: dim 优先 schedule.dim，缺则从 post_type 反查
+    const dim = (r.dim as Dim) || OLD_TYPE_TO_DIM_DASH[r.post_type] || 'F'
+    dimTotal[dim] = (dimTotal[dim] || 0) + 1
+    if (r.status === 'posted') dimPosted[dim] = (dimPosted[dim] || 0) + 1
   }
 
   // 智能推荐：本月已发数最少的 2 个维度（"本周多发"建议）
   const sortedByPosted = Object.entries(dimPosted).sort((a, b) => a[1] - b[1])
   const recommendations = sortedByPosted.slice(0, 2).map(([dim, n]) => {
-    const types = DIMENSION_TYPE_MAP[dim] || []
-    return { dim, posted: n, types }
+    return { dim: dim as Dim, posted: n, types: [] }  // D55: 7 维度无对应 post_type 概念
   })
 
   // D36 月阶段 + 周主题

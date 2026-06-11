@@ -6,13 +6,15 @@
 
 import { loadUserColors, typeStyle } from "./lib/type-colors"
 import { loadUserTheme, themeCssVar } from "./lib/theme"
-import { SLOTS, SLOT_IDS, POST_TYPES, TYPE_TO_TEMPLATE, TYPE_TIPS, isSlot, SlotId } from "./lib/schedule-constants"
+import { SLOTS, SLOT_IDS, DIMS, DIM_IDS, HOOK_HINTS, isSlot, SlotId, Dim, loadTopCategoryForDim } from "./lib/schedule-constants"
 
 interface User { id: string; username: string; display_name: string | null }
 interface ScheduleRow {
-  id: string; date: string; slot: string; post_type: string; template_id: string | null;
+  id: string; date: string; slot: string; post_type: string | null; dim: string | null;
+  category_id: string | null; template_id: string | null;
   status: string; note: string | null; sort_order: number;
 }
+const OLD_TYPE_TO_DIM_CAL: Record<string, Dim> = { '干货': 'F', '生活': 'E', '客户': 'B', '互动': 'G', '软广': 'C', '复盘': 'F', '休息': 'E' }
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!))
@@ -149,10 +151,11 @@ ${themeCssVar(theme)}
         <input type="hidden" name="slot" value="${addSlot}">
         <div class="add-form-row">
           <span class="add-date">${addDate} · ${addSlotMeta?.label}</span>
-          <select name="post_type" required>
-            ${POST_TYPES.map(t => {
-              const sel = addSchedBySlot[addSlot]?.post_type === t ? ' selected' : ''
-              return `<option value="${t}"${sel}>${t}</option>`
+          <select name="dim" required>
+            ${DIMS.map(d => {
+              const schedDim = addSchedBySlot[addSlot]?.dim || OLD_TYPE_TO_DIM_CAL[addSchedBySlot[addSlot]?.post_type || ''] || ''
+              const sel = schedDim === d.id ? ' selected' : ''
+              return `<option value="${d.id}"${sel}>${d.id} ${d.name}</option>`
             }).join('')}
           </select>
           <button type="submit" class="btn-primary btn-sm">✓ ${addSchedBySlot[addSlot] ? '更新' : '安排'}</button>
@@ -202,7 +205,7 @@ ${themeCssVar(theme)}
     ` : ''}
 
     <div class="legend">
-      ${POST_TYPES.map(t => `<span class="legend-item" style="${typeStyle(colors, t)}">${t}</span>`).join('')}
+      ${DIM_IDS.map(d => { const dm = DIMS.find(x => x.id === d)!; return `<span class="legend-item" style="${typeStyle(colors, d)}">${d} ${dm.name}</span>` }).join('')}
       <a href="/today" class="btn-link" style="margin-left:auto">→ 今日</a>
     </div>
 

@@ -11,9 +11,12 @@
 // ============================================
 
 import { getUser, json, jsonError, readJson, CrudError, newId } from "../crud-helper"
-import { isSlot, isPostType, TYPE_TO_TEMPLATE } from "../../lib/schedule-constants"
+import { isSlot, isDim, type Dim, loadTopCategoryForDim } from "../../lib/schedule-constants"
 
 interface User { id: string }
+
+// D55: 旧 7 type → dim
+const OLD_TYPE_TO_DIM_ADDON: Record<string, Dim> = { '干货': 'F', '生活': 'E', '客户': 'B', '互动': 'G', '软广': 'C', '复盘': 'F', '休息': 'E' }
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
@@ -55,8 +58,8 @@ export async function onRequestPost(ctx: {
 
     // 查今天这 slot 是否已有排期
     const existing = await ctx.env.DB.prepare(
-      "SELECT id, post_type, template_id FROM schedule WHERE user_id = ? AND date = ? AND slot = ?"
-    ).bind(user.id, today, slot).first<{ id: string; post_type: string; template_id: string | null }>()
+      "SELECT id, post_type, dim, category_id, template_id FROM schedule WHERE user_id = ? AND date = ? AND slot = ?"
+    ).bind(user.id, today, slot).first<{ id: string; post_type: string | null; dim: string | null; category_id: string | null; template_id: string | null }>()
 
     if (action === "posted" || action === "skipped") {
       // 标记状态
@@ -65,11 +68,18 @@ export async function onRequestPost(ctx: {
           "UPDATE schedule SET status = ?, note = ?, updated_at = ? WHERE user_id = ? AND date = ? AND slot = ?"
         ).bind(action, body.note || null, now, user.id, today, slot).run()
       } else {
-        // 没排期也要能标记（创建一条占位）
-        await ctx.env.DB.prepare(
-          `INSERT INTO schedule (id, user_id, date, slot, post_type, template_id, status, note, sort_order, updated_at)
-           VALUES (?, ?, ?, ?, '休息', 'lifestyle', ?, ?, 0, ?)`
-        ).bind(newId(), user.id, today, slot, action, body.note || null, now).run()
+        // 没排期也要能标记（创建一条占位，dim 缺省 F）
+        try {
+          await ctx.env.DB.prepare(
+            `INSERT INTO schedule (id, user_id, date, slot, dim, post_type, template_id, status, note, sort_order, updated_at)
+             VALUES (?, ?, ?, ?, 'F', '休息', 'lifestyle', ?, ?, 0, ?)`
+          ).bind(newId(), user.id, today, slot, action, body.note || null, now).run()
+        } catch {
+          await ctx.env.DB.prepare(
+            `INSERT INTO schedule (id, user_id, date, slot, post_type, template_id, status, note, sort_order, updated_at)
+             VALUES (?, ?, ?, ?, '休息', 'lifestyle', ?, ?, 0, ?)`
+          ).bind(newId(), user.id, today, slot, action, body.note || null, now).run()
+        }
       }
 
       // ★ 同步：标记 ai_drafts 已用
@@ -118,16 +128,32 @@ export async function onRequestPost(ctx: {
         ).bind(newId(), user.id, today, slot, body.note || null, now).run()
       }
     } else if (action === "accept_candidate") {
-      // D46: 接受候选加量 → 在该 slot 额外插一条 schedule（sort_order=1 区分固定）
+      // D55: 接受候选加量 → 在该 slot 额外插一条 schedule（sort_order=1 区分固定，dim + category_id 优先）
       const candType = body.candidate_type || ""
-      if (!isPostType(candType)) {
-        throw new CrudError(`candidate_type 必须是 7 种 post_type 之一，当前：${candType}`, 400)
+      let candDim: Dim = 'F'
+      if (isDim(candType)) {
+        candDim = candType as Dim
+      } else if (candType && OLD_TYPE_TO_DIM_ADDON[candType]) {
+        candDim = OLD_TYPE_TO_DIM_ADDON[candType]
+      } else {
+        candDim = 'F'
       }
-      const tplId = TYPE_TO_TEMPLATE[candType as keyof typeof TYPE_TO_TEMPLATE] || 'lifestyle'
-      await ctx.env.DB.prepare(
-        `INSERT INTO schedule (id, user_id, date, slot, post_type, template_id, status, note, sort_order, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 1, ?)`
-      ).bind(newId(), user.id, today, slot, candType, tplId, `加量: ${candType}`, now).run()
+      // 查 dim 对应的 top1 category
+      const cat = await loadTopCategoryForDim(ctx.env, candDim, slot as SlotId)
+      const categoryId = cat?.id || null
+      const tplId = candDim
+      try {
+        await ctx.env.DB.prepare(
+          `INSERT INTO schedule (id, user_id, date, slot, dim, category_id, post_type, template_id, status, note, sort_order, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 1, ?)`
+        ).bind(newId(), user.id, today, slot, candDim, categoryId, candDim, tplId, `加量: ${candDim}`, now).run()
+      } catch {
+        // 兼容旧 schema
+        await ctx.env.DB.prepare(
+          `INSERT INTO schedule (id, user_id, date, slot, post_type, template_id, status, note, sort_order, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 1, ?)`
+        ).bind(newId(), user.id, today, slot, candDim, tplId, `加量: ${candDim}`, now).run()
+      }
     } else {
       throw new CrudError(`action 必须是 note/posted/skipped/accept_candidate，当前：${action}`, 400)
     }

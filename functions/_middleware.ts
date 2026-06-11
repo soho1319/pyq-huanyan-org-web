@@ -22,9 +22,13 @@ interface MiddlewareEnv extends AuthEnv {
 }
 
 function requiresAuth(pathname: string): boolean {
+  // 公开 API（无需登录）
+  if (pathname === "/api/register") return false
   if (pathname.startsWith("/api/")) return true
   if (pathname === "/today") return true
+  if (pathname === "/my") return true
   if (pathname.startsWith("/my/")) return true
+  if (pathname.startsWith("/admin/")) return true
   if (pathname === "/calendar" || pathname.startsWith("/calendar/")) return true
   return false
 }

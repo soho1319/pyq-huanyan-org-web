@@ -52,20 +52,25 @@ export interface WeeklyData {
   skipped: number
   pending: number
   total: number
-  byType: Record<string, number>
+  byType: Record<string, number>   // 兼容旧：仍按 post_type 聚合
+  byDim: Record<string, number>    // D55: 按 dim 聚合
   bySlot: Record<string, number>
-  byDay: Array<{ date: string; post_type: string; slot: string; status: string }>
+  byDay: Array<{ date: string; post_type: string; dim: string | null; slot: string; status: string }>
 }
+
+// D55: 旧 7 type → dim 映射
+const OLD_TYPE_TO_DIM: Record<string, string> = { '干货': 'F', '生活': 'E', '客户': 'B', '互动': 'G', '软广': 'C', '复盘': 'F', '休息': 'E' }
 
 export async function loadWeekData(env: D1Database, userId: string, weekStart: Date): Promise<WeeklyData> {
   const start = ymd(weekStart)
   const end = ymd(addDays(weekStart, 6))
 
   const rows = await env.prepare(
-    "SELECT date, slot, post_type, status FROM schedule WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date, slot"
-  ).bind(userId, start, end).all<{ date: string; slot: string; post_type: string; status: string }>()
+    "SELECT date, slot, post_type, dim, status FROM schedule WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date, slot, sort_order"
+  ).bind(userId, start, end).all<{ date: string; slot: string; post_type: string; dim: string | null; status: string }>()
 
   const byType: Record<string, number> = {}
+  const byDim: Record<string, number> = {}
   const bySlot: Record<string, number> = {}
   let posted = 0, skipped = 0, pending = 0
   for (const r of rows.results || []) {
@@ -73,6 +78,9 @@ export async function loadWeekData(env: D1Database, userId: string, weekStart: D
     else if (r.status === 'skipped') skipped++
     else pending++
     byType[r.post_type] = (byType[r.post_type] || 0) + 1
+    // D55: dim 优先 schedule.dim，缺则从 post_type 反查
+    const dim = r.dim || OLD_TYPE_TO_DIM[r.post_type] || 'F'
+    byDim[dim] = (byDim[dim] || 0) + 1
     bySlot[r.slot] = (bySlot[r.slot] || 0) + 1
   }
 

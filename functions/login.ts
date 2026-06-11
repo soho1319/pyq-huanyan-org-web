@@ -66,6 +66,8 @@ function renderLoginPage(
   button:active { transform: scale(0.98); }
   .error { background: #fed7d7; color: #c53030; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; text-align: center; }
   .hint { text-align: center; color: #a0aec0; font-size: 12px; margin-top: 16px; }
+  .hint a { color: #667eea; text-decoration: none; }
+  .hint a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -82,7 +84,7 @@ function renderLoginPage(
       <input type="password" id="password" name="password" autocomplete="current-password" required>
     </div>
     <button type="submit">登 入</button>
-    <div class="hint">输入你的账号密码即可访问</div>
+    <div class="hint">还没有账号？<a href="/register">用邀请码注册</a></div>
   </form>
 </body>
 </html>`

@@ -1,271 +1,142 @@
 // ============================================
-// 排期共享常量（4 段固定时段 + 7 种 post_type）
-// D29 之前散在 4+ 个文件重复，改一次要改 4 处 → 集中到这
+// 排期共享常量 — D55 彻底切换到 7 维度（A-G）
+// 旧 7 type（干货/生活/客户/互动/软广/复盘/休息）完全废弃
+// 7 维度 = 课程 7 大维度 = 朋友圈能发的所有内容
+//   A 观赏 / B 专业 / C 情绪 / D 身份 / E 生活 / F 思想 / G 关系
 // ============================================
 
-// 4 段固定时段（slot ID 不允许改，时间已确认）
+// 4 段固定时段（D55-3 确认；18-19 傍晚段合并入 evening）
 export const SLOTS = [
   { id: "morning", label: "早", time: "08:00" },
   { id: "noon",    label: "午", time: "12:30" },
-  { id: "evening", label: "晚", time: "20:00" },
+  { id: "evening", label: "傍晚", time: "18:00" },  // D55 加 18-19 傍晚段
+  { id: "late",    label: "晚", time: "20:00" },
   { id: "night",   label: "夜", time: "22:30" },
 ] as const
 
 export type SlotId = (typeof SLOTS)[number]["id"]
 export const SLOT_IDS = SLOTS.map(s => s.id) as readonly SlotId[]
 
-// 7 种 post_type（之前散在 4 个文件）
-export const POST_TYPES = ["干货", "生活", "客户", "互动", "软广", "复盘", "休息"] as const
-export type PostType = (typeof POST_TYPES)[number]
+// ============================================
+// 7 维度（D55 完全替代旧 7 type）
+// ============================================
 
-// 7 天循环（周一到周日）
-export const ROTATION: PostType[] = ["干货", "生活", "客户", "互动", "软广", "复盘", "休息"]
+export const DIMS = [
+  { id: "A", code: "VIEW",  name: "观赏价值", desc: "美学与视觉（看着舒服就想点进来看）" },
+  { id: "B", code: "PRO",   name: "专业价值", desc: "问题解决（专业但不堆术语）" },
+  { id: "C", code: "EMO",   name: "情绪价值", desc: "状态共鸣（调动别人情绪）" },
+  { id: "D", code: "ID",    name: "身份维度", desc: "角色定位（我是谁）" },
+  { id: "E", code: "LIFE",  name: "生活维度", desc: "真实质感（有血有肉的人）" },
+  { id: "F", code: "THINK", name: "思想维度", desc: "筛选同频（价值观/反认知）" },
+  { id: "G", code: "REL",   name: "关系维度", desc: "经营人脉（我活在关系里）" },
+] as const
 
-// post_type → 默认推荐 formula_id 映射（之前重复 3 处）
-export const TYPE_TO_TEMPLATE: Record<PostType, string> = {
-  "干货": "pro",
-  "生活": "lifestyle",
-  "客户": "testimonial",
-  "互动": "ask",
-  "软广": "softad",
-  "复盘": "review",
-  "休息": "lifestyle",
+export type Dim = (typeof DIMS)[number]["id"]
+export const DIM_IDS = DIMS.map(d => d.id) as readonly Dim[]
+
+// Back-compat: 老 API 仍叫 post_types / TYPE_TEMPLATE 的代码（D29 旧 7 type 名：干货/生活/客户/互动/软广/复盘/休息）
+// D55 后语义已统一为 dim 7 维 A-G；这里返回 dim ids 供新 form (<select name="dim">) 校验
+export const POST_TYPES = DIM_IDS as readonly string[]
+
+// Back-compat: 老代码用 TYPE_TO_TEMPLATE[postType] 查默认模板
+// 现在 postType 已是 dim id（A-G），每个 dim 给一个语义化默认模板
+export const TYPE_TO_TEMPLATE: Record<Dim, string> = {
+  A: "aesthetic",     // 观赏价值
+  B: "professional",  // 专业价值
+  C: "emotional",     // 情绪价值
+  D: "identity",      // 身份维度
+  E: "lifestyle",     // 生活维度
+  F: "reflective",    // 思想维度
+  G: "relational",    // 关系维度
 }
 
-// D45: 类型小主题库（按课程 7 场景 A-G + 全套循环体系对齐）
-// 第一行 = 核心公式；后续 = 课程里有的小主题
-// 渲染：today.ts 用 white-space: pre-line 保留换行
-export const TYPE_TIPS: Record<string, string> = {
-  "干货": `核心公式：痛点具象化 = 人群画像 + 场景冲突 + 隐藏情绪 + Why + 金句/价值观结尾
-📍 场景 D 痛点具象化：害怕 / 恐惧 / 担忧 / 焦虑 / 痛苦 / 同付出不同回报 / 不公平对待
-🔑 刺痛关键词：教育焦虑(35岁危机/工资倒挂/被裁员/学历歧视) · 情感危机(冷暴力/丧偶式育儿/查手机/失眠) · 副业(死工资/房贷压顶/鄙视链底层) · 健康(体检警告/前任羞辱)
-💡 反认知金句 11 公式（[[08 反认知金句]]）：[你以为的 X] = [实际是 Y]
-✍️ 写痛点 3 法：①具象化(词→短句→小短文→长文章) ②故事文万能结构 ③谈单句式("明明…但…"/"你是不是最近…")
-👤 场景 A 立人设 4 步：基础自我介绍(成就结果/帮助人数/踩坑/改变/身份) → 20 句凡尔赛一句话 → 7 年年轮法个人故事 → 1 段朋友圈简介
-🗓 第 1 月破冰月：大量输出痛点共鸣 + 反认知 + 免费初筛钩子，专业干货占比高
-❌ 避坑：不要把多个痛点堆在一个故事里 / 不要一上来直接讲产品（先共鸣+反认知+救赎）`,
-
-  "生活": `核心心法："先成为有趣的人，再去做有趣的事"。跟闺蜜聊天的状态，私聊不要用"您"用"你"
-🎭 有趣好玩 5 种写法（场景 F）：①生活片段有趣(天道好轮回) ②幽默段子 ③剧本式 ④自嘲自黑反转 ⑤软广场景化
-🌱 价值观 5 种（场景 F）：①社会现象看法 ②新闻热点 ③观后感/读后感 ④成长感悟 ⑤改变心得
-🌸 生活小确幸/至暗：下午茶感悟、跑步 500 天改变、辞职/结婚连载、命理师视角、宝妈时间管理
-📸 配图建议：高颜值自拍、宠物/小孩、同色系九宫格、生活格调照
-📆 周六至周日比重增加(70%)：周末放松，多发高颜值生活照、社交合影、生命经历故事
-♻️ 月末归档：3 个月后从"已发内容"库自动提示可重新发布（一鸭多吃）`,
-
-  "客户": `核心公式：谁 + 痛点 + 做了什么 + 结果 + 原话（客户证言万能模板）
-🎙 直播稿 SOP 6 步（场景 C）：自我介绍 → 圈人群(用户画像) → 痛点 → 理念 → 好评 → 产品
-📣 朋友圈宣发 4 步：①结果前置引发好奇("21 天收款 188 万") ②之前多惨("被坑一万，啥都没学到") ③经过我们什么("21 天实战代练") ④改变结果对比 + 结尾引发好奇("点赞=像素级拆解")
-🛍 塑产品 5 种讲述：①场景描述(用小词不用大词) ②打比方 ③讲故事(why-how-what) ④举例子 ⑤做对比(价值塑造→破价)
-📦 客户案例 5 要素：persona(谁) / pain(痛点) / action(做了什么) / result(结果) / testimonial(原话)
-📸 配图建议：前后反差图、客户反馈截图、报喜收款图、工艺/方法拆解
-❌ 避坑：不要只讲产品好处(用户要解决方案不是产品) / 不要先讲产品再讲理念`,
-
-  "互动": `核心公式：场景描述 + 灵魂提问 + 引导回应（评论区扣字 / 点赞=福利）
-🪝 3 类钩子（场景 B）：①加 V 钩子(朋友圈 → 评论区扣"想"我私聊发《100 个赚钱锦囊》) ②私聊钩子(社群 → 今天没讲完下条揭秘) ③线索钩子(直播 → 扫码填《商业测评》)
-🎁 福利互动（场景 F）：第 28 位 / 38 位点赞获得神秘福利
-💬 观点型互动（场景 F）："XX 这件事你怎么看？站队 A 扣 1，站队 B 扣 2"
-🌍 生活话题互动（场景 F）："今天做的 XXX，你们也这样做吗？"
-📍 发钩子的 5 个场景：朋友圈结尾 / 社群分享结尾 / 直播分享结尾 / 公众号文章结尾 / 小绿书
-❌ 避坑：不要给客户发一大堆资料(资料做弹药库先私聊) / 不要把问卷当普通链接`,
-
-  "软广": `核心心法：种草不硬广，产品是配角，故事是主角
-🎬 软广 5 步法（场景 E）：①确定产品 → ②确定使用场景 → ③确定故事场景(耳熟能详) → ④确定植入片段(产品亮点自然插入) → ⑤改写故事(保持原貌加产品细节)
-📚 4 种故事类型：①改写童话(灰姑娘/白雪公主/西游记/牛郎织女) ②改写古代(后羿射日/哪吒) ③改写电视剧(甄嬛传/还珠格格) ④改写日常生活
-✨ 成功案例：白雪公主+魔镜+面膜 / 西游记+吹风机(孙悟空用速飞记忆负离子) / 牛郎织女+教育金保单(王母拔金钗划银河) / 后羿射日+太阳眼镜 / 甄嬛传+英子护肤神器
-🚫 朋友圈广告 6 大误区：①说明书式 ②没剧情直接讲好处 ③没产品亮点 ④配图辣眼睛 ⑤天天硬广 ⑥不敢"脱文化"
-📸 配图建议：反馈截图、高颜值产品场景图、客户使用对比图
-❌ 避坑：故事要选大家耳熟能详的(记忆装置已安装) / 不要把广告硬塞进故事`,
-
-  "复盘": `核心公式：故事万能模板 = 背景 + 冲突 + 转折 + 结果 + 反思
-📅 7 年年轮法（场景 A）：把人生/创业/项目切成 7 个关键节点，每节点一主题（立人设/转折/踩坑/复盘等）
-📣 宣发 4 步（场景 C）：①结果前置(21 天收款 188 万) ②之前多惨 ③经过我们什么 ④改变结果对比
-🔁 反差钩子："30 天前 XXX，现在 XXX"（高光+至暗双线）
-📊 周复盘：本周干货已发 N 条·软目标 M 条 + 7 维度覆盖 + 维度诊断（自动提示补哪个）
-📦 月末归档：本月爆款(好案例/好故事)打标签入库，3 个月后可复用
-❌ 避坑：不要把多个痛点堆在一个故事里 / 不要把别人删改照搬抄过来(要加自己东西)`,
-
-  "休息": `1 张图 + 1 句心情，不强求转化
-🛡 防折叠规则（场景 G）：不超一个手机屏幕 / 段落空行 / 配图不要 5/7/8 张缺角 / 表情符号不要太多
-📗 小绿书操作：选"图片文字"创建 → 拖图片 + 输标题 + 输文字 → 直接放二维码（朋友圈不被折叠）
-🧩 基础三件套：头像(真人露脸) / 朋友圈封面(真人高级感照，不要用海报) / 签名(价值观/初心/我解决什么问题)
-✒️ 一条朋友圈只表达一个核心要点，不要堆多个意思
-🕐 最佳时段：周末早 8 / 节假日 / 情绪低沉日`,
+// 维度 → AI prompt 映射
+export const DIM_PROMPT: Record<Dim, string> = {
+  A: "P12",  // 观赏价值（综合 3 条）
+  B: "P5",   // 专业价值（用户案例）
+  C: "P4",   // 情绪价值（痛点）
+  D: "P1",   // 身份维度（自我介绍）
+  E: "P6",   // 生活维度（个人故事）
+  F: "P3",   // 思想维度（反认知金句）
+  G: "P9",   // 关系维度（连载故事）
 }
 
-// D54: 每个 type 抽 4-5 个"📍 场景 XXXX"子主题（从 TYPE_TIPS 多行内容里精选）
-// 用途: /today 卡片 type badge 旁边显示"📍 场景 A 立人设"细标签，AI prompt 也用
-// 不持久化到 D1，runtime 按日期 hash 选 1 个（同一 type 同一天看到的 subtheme 一致）
-export const TYPE_SUBTHEMES: Record<string, Array<{ id: string; label: string }>> = {
-  "干货": [
-    { id: "A", label: "立人设 4 步" },
-    { id: "D", label: "痛点具象化" },
-    { id: "反认知", label: "反认知金句 11 公式" },
-    { id: "谈单", label: "谈单句式 3 法" },
-    { id: "故事文", label: "故事文万能结构" },
-  ],
-  "生活": [
-    { id: "F-有趣", label: "有趣好玩 5 写法" },
-    { id: "F-价值观", label: "价值观 5 种" },
-    { id: "小确幸", label: "小确幸/至暗时刻" },
-    { id: "连载", label: "辞职/结婚/跑步连载" },
-    { id: "周末", label: "周末高颜值生活照" },
-  ],
-  "客户": [
-    { id: "C-证言", label: "客户证言万能 5 要素" },
-    { id: "C-直播", label: "直播稿 SOP 6 步" },
-    { id: "宣发", label: "朋友圈宣发 4 步" },
-    { id: "塑产品", label: "塑产品 5 种讲述" },
-    { id: "反差", label: "前后反差对比图" },
-  ],
-  "互动": [
-    { id: "B-钩子", label: "3 类钩子（加 V/私聊/线索）" },
-    { id: "福利", label: "点赞=福利（第 N 位）" },
-    { id: "观点", label: "站队提问" },
-    { id: "话题", label: "生活话题互动" },
-    { id: "5场景", label: "发钩子 5 个场景" },
-  ],
-  "软广": [
-    { id: "E-5步", label: "软广 5 步法" },
-    { id: "童话", label: "改写童话" },
-    { id: "古代", label: "改写古代" },
-    { id: "电视剧", label: "改写电视剧" },
-    { id: "日常", label: "改写日常生活" },
-  ],
-  "复盘": [
-    { id: "故事", label: "故事万能 5 段式" },
-    { id: "7年", label: "7 年年轮法" },
-    { id: "宣发", label: "宣发 4 步（结果前置）" },
-    { id: "反差", label: "30 天前 vs 现在" },
-    { id: "周复盘", label: "周复盘 + 7 维度诊断" },
-  ],
-  "休息": [
-    { id: "G-防折叠", label: "防折叠 5 规则" },
-    { id: "小绿书", label: "小绿书操作" },
-    { id: "三件套", label: "头像/封面/签名" },
-    { id: "心情", label: "1 张图 + 1 句心情" },
-    { id: "轻松日", label: "周末/节假日最佳" },
-  ],
+// 维度 → 默认必发频次/周
+export const DIM_FREQ_PER_WEEK: Record<Dim, number> = {
+  A: 2, B: 3, C: 3, D: 1, E: 2, F: 2, G: 1,
 }
 
-// D54: 按 date+type hash 选 1 个 subtheme（确保同一天同一 type 看到一致的）
-export function pickSubtheme(type: string, date: string): { id: string; label: string } | null {
-  const list = TYPE_SUBTHEMES[type]
-  if (!list || list.length === 0) return null
-  // 简单 hash: 字符串 char 累加
-  let h = 0
-  const s = date + type
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
-  const idx = Math.abs(h) % list.length
-  return list[idx]
+// 5 段 × dim 7 必发频次/周
+// 维度 × 段 对照表
+export const DIM_SLOT_PREF: Record<Dim, SlotId[]> = {
+  A: ["morning", "noon"],
+  B: ["noon", "evening", "late"],
+  C: ["morning", "noon", "evening", "late"],
+  D: ["morning", "noon", "evening"],
+  E: ["morning", "evening", "night"],
+  F: ["morning", "noon"],
+  G: ["evening", "late", "noon"],
 }
 
-// ymd 工具（之前重复 5+ 处）
-export function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+// 7 天循环（按 dim 维度排）— 每天 top1 维度参考
+export const ROTATION: Dim[] = ["A", "B", "C", "D", "E", "F", "G"]
+
+// ============================================
+// 5 段调性权重（D55-3 5 段最终版：早 F / 午 G 互动 / 傍 B / 晚 G+连载 / 夜 E）
+// ============================================
+export const SLOT_TONAL_WEIGHTS: Record<SlotId, Record<Dim, number>> = {
+  // 早 7-9: F 思想（反认知）+ C 情绪（价值观） + E 生活（小确幸）
+  morning: { F: 0.30, C: 0.25, E: 0.20, D: 0.10, A: 0.10, B: 0.05 },
+  // 午 12-14: G 关系（互动/钩子）+ C 情绪（轻松）+ E 生活（动态）  ← D55-3 互换
+  noon:    { G: 0.25, C: 0.20, E: 0.15, B: 0.15, A: 0.10, D: 0.10, F: 0.05 },
+  // 傍 18-19: B 专业（干货/案例）+ A 观赏（高级配图）  ← D55-3 新增段
+  evening: { B: 0.30, A: 0.20, G: 0.15, C: 0.10, F: 0.10, D: 0.10, E: 0.05 },
+  // 晚 20-22: G 关系（连载/互动/复盘）+ C 情绪（软广种草）
+  late:    { G: 0.30, C: 0.20, B: 0.15, E: 0.10, F: 0.10, D: 0.10, A: 0.05 },
+  // 夜 22-23: E 生活（感悟/反思）+ D 身份（自嘲）
+  night:   { E: 0.30, D: 0.20, F: 0.10, C: 0.10, B: 0.10, G: 0.10, A: 0.10 },
 }
 
-export function addDays(d: Date, n: number): Date {
-  const x = new Date(d)
-  x.setDate(x.getDate() + n)
-  return x
-}
-
-// type guards
-export function isPostType(s: string): s is PostType {
-  return (POST_TYPES as readonly string[]).includes(s)
-}
-export function isSlot(s: string): s is SlotId {
-  return (SLOT_IDS as readonly string[]).includes(s)
-}
-
-// 决定某天该开几段：D50 _default 数组 > per-date JSON 覆盖 > 默认 N 段
-export function resolveEnabledSlots(
-  settings: { default_slots_per_day: number; slot_config_json: string | null } | null,
-  date: string
-): SlotId[] {
-  if (settings?.slot_config_json) {
-    try {
-      const m = JSON.parse(settings.slot_config_json)
-      // 1. D50: 全局 _default 数组（用户勾了哪几段就是哪几段，顺序由勾选决定）
-      if (Array.isArray(m._default)) {
-        // per-date 覆盖优先于 _default
-        if (Array.isArray(m[date])) return m[date] as SlotId[]
-        const valid = (m._default as unknown[]).filter(
-          (s): s is SlotId => typeof s === "string" && (SLOT_IDS as readonly string[]).includes(s)
-        )
-        if (valid.length > 0) return valid
-      }
-      // 2. 老格式：只有 per-date 覆盖
-      if (Array.isArray(m[date])) return m[date] as SlotId[]
-    } catch {}
-  }
-  // 3. 兜底：D50+ 默认 4 段全勾（每天都要发）
-  //    向后兼容老 D29 用户：default_slots_per_day=1 仍走 SLOTS.slice(0,1)
-  //    但 default_slots_per_day=4 或没有值（首次注册） → 4 段全开
-  const n = settings?.default_slots_per_day
-  if (n && n > 0 && n < 4) return SLOTS.slice(0, Math.min(4, n)).map(s => s.id)
-  return SLOTS.map(s => s.id)  // 默认 4 段全发
-}
-
-// 安全 wrapper：migration 还没跑时降级到 ['morning']
-export async function loadEnabledSlots(
-  env: { DB?: D1Database },
-  userId: string,
-  date: string
-): Promise<SlotId[]> {
-  if (!env.DB) return ["morning"]
-  try {
-    const row = await env.DB.prepare(
-      "SELECT default_slots_per_day, slot_config_json FROM user_settings WHERE user_id = ?"
-    ).bind(userId).first<{ default_slots_per_day: number; slot_config_json: string | null }>()
-    return resolveEnabledSlots(row, date)
-  } catch {
-    // migration 还没跑（D29 前）→ 降级到 1 段
-    return ["morning"]
-  }
+// 周末（D55-3 同步）：放松调性
+export const WEEKEND_TONAL: Record<SlotId, Record<Dim, number>> = {
+  morning: { E: 0.30, A: 0.20, C: 0.20, F: 0.10, D: 0.10, B: 0.05, G: 0.05 },
+  noon:    { E: 0.25, C: 0.20, G: 0.20, A: 0.10, B: 0.10, F: 0.10, D: 0.05 },
+  evening: { G: 0.20, C: 0.20, B: 0.15, A: 0.15, E: 0.15, F: 0.10, D: 0.05 },
+  late:    { G: 0.25, E: 0.20, C: 0.15, B: 0.10, F: 0.10, D: 0.10, A: 0.10 },
+  night:   { E: 0.30, D: 0.15, C: 0.15, A: 0.15, G: 0.10, F: 0.10, B: 0.05 },
 }
 
 // ============================================
-// D36: 朋友圈运营循环体系（4 周 + 3 月 + 周内比重 + 7 维度）
+// D36: 周主题 4 周循环（按 dim 7 维度权重）
 // ============================================
 
-// D36: 周主题 4 周循环（立人设/反认知/讲故事/立边界）
 export const WEEKLY_THEMES = {
-  identity:   { label: '立人设', weights: { '干货': 0.30, '生活': 0.30, '客户': 0.10, '互动': 0.05, '软广': 0.05, '复盘': 0.15, '休息': 0.05 } },
-  contrarian: { label: '反认知', weights: { '干货': 0.45, '复盘': 0.25, '互动': 0.15, '软广': 0.05, '客户': 0.05, '生活': 0.03, '休息': 0.02 } },
-  story:      { label: '讲故事', weights: { '复盘': 0.30, '客户': 0.25, '生活': 0.20, '互动': 0.10, '干货': 0.10, '软广': 0.03, '休息': 0.02 } },
-  boundary:   { label: '立边界', weights: { '软广': 0.30, '客户': 0.25, '互动': 0.20, '干货': 0.10, '复盘': 0.08, '生活': 0.05, '休息': 0.02 } },
+  identity:   { label: '立人设',  weights: { D: 0.35, E: 0.25, A: 0.15, B: 0.10, C: 0.05, F: 0.05, G: 0.05 } },
+  contrarian: { label: '反认知',  weights: { F: 0.35, C: 0.20, B: 0.15, E: 0.10, A: 0.10, D: 0.05, G: 0.05 } },
+  story:      { label: '讲故事',  weights: { G: 0.30, E: 0.20, C: 0.15, B: 0.15, F: 0.10, A: 0.05, D: 0.05 } },
+  boundary:   { label: '立边界',  weights: { D: 0.25, G: 0.20, C: 0.15, B: 0.15, F: 0.10, A: 0.10, E: 0.05 } },
 } as const
 
 export type WeeklyThemeId = keyof typeof WEEKLY_THEMES
 
-// D36: 月主题 3 月循环（破冰/转化/复购）
+// D36: 月主题 3 月循环（按 dim 7 维度权重）
 export const MONTHLY_PHASES = {
-  1: { label: '破冰', weights: { '干货': 0.35, '互动': 0.20, '客户': 0.10, '复盘': 0.10, '生活': 0.10, '软广': 0.10, '休息': 0.05 } },
-  2: { label: '转化', weights: { '客户': 0.25, '软广': 0.25, '干货': 0.15, '互动': 0.15, '复盘': 0.10, '生活': 0.05, '休息': 0.05 } },
-  3: { label: '复购', weights: { '互动': 0.25, '复盘': 0.20, '客户': 0.20, '生活': 0.15, '干货': 0.10, '软广': 0.08, '休息': 0.02 } },
+  1: { label: '破冰', weights: { F: 0.30, C: 0.20, D: 0.15, B: 0.15, E: 0.10, A: 0.05, G: 0.05 } },
+  2: { label: '转化', weights: { B: 0.25, G: 0.20, C: 0.15, F: 0.10, D: 0.10, A: 0.10, E: 0.10 } },
+  3: { label: '复购', weights: { C: 0.20, E: 0.15, G: 0.20, D: 0.15, B: 0.15, A: 0.10, F: 0.05 } },
 } as const
 
 // D36: 周内 dayOfWeek 3 段（early/mid/weekend）
 export const WEEKDAY_PHASE_WEIGHTS = {
-  early:   { '干货': 0.30, '复盘': 0.20, '客户': 0.15, '互动': 0.10, '生活': 0.10, '软广': 0.10, '休息': 0.05 },
-  mid:     { '软广': 0.25, '互动': 0.20, '客户': 0.15, '干货': 0.15, '生活': 0.10, '复盘': 0.10, '休息': 0.05 },
-  weekend: { '生活': 0.30, '互动': 0.25, '休息': 0.15, '复盘': 0.10, '客户': 0.10, '干货': 0.05, '软广': 0.05 },
+  early:   { F: 0.25, D: 0.20, B: 0.15, C: 0.10, E: 0.10, A: 0.10, G: 0.10 },
+  mid:     { B: 0.20, G: 0.20, C: 0.15, F: 0.15, A: 0.10, D: 0.10, E: 0.10 },
+  weekend: { E: 0.25, A: 0.20, C: 0.20, G: 0.15, B: 0.10, D: 0.05, F: 0.05 },
 } as const
 
-// D36: 7 维度 → 7 种 post_type 映射
-export const DIMENSION_TYPE_MAP: Record<string, string[]> = {
-  '身份': ['干货', '客户'],
-  '原生': ['生活', '互动'],
-  '生活': ['生活', '休息'],
-  '专业': ['干货', '客户', '软广'],
-  '关系': ['互动', '软广'],
-  '思想': ['干货', '复盘'],
-  '链接': ['互动', '软广'],
-}
+// ============================================
+// D36 工具函数（彻底用 dim 替换 post_type）
+// ============================================
 
-// D36: 工具：算本周周主题（自动循环 + 可锁）
 export function getWeeklyTheme(
   weekStart: string,
   userLocked: { theme: WeeklyThemeId } | null
@@ -282,7 +153,6 @@ export function getWeeklyTheme(
   return { theme: autoTheme, weights: WEEKLY_THEMES[autoTheme].weights, locked: false, cycleIndex, label: WEEKLY_THEMES[autoTheme].label }
 }
 
-// D36: 工具：算本月月阶段（自动循环 + cycle_index 覆盖）
 export function getMonthlyPhase(
   yearMonth: string,
   userCycleIndex: number | null
@@ -298,137 +168,69 @@ export function getMonthlyPhase(
   return { phase: cycleIndex as 1|2|3, weights: MONTHLY_PHASES[cycleIndex as 1|2|3].weights, locked: false, cycleIndex, label: MONTHLY_PHASES[cycleIndex as 1|2|3].label }
 }
 
-// D36: 工具：dayOfWeek → phase
 export function getWeekdayPhase(dayOfWeek: number): 'early'|'mid'|'weekend' {
   if (dayOfWeek === 0 || dayOfWeek === 6) return 'weekend'
   if (dayOfWeek <= 3) return 'early'
   return 'mid'
 }
 
-// D36: 工具：post_type → 7 维度
-export function reverseDimensionMap(postType: string): string[] {
-  const dims: string[] = []
-  for (const [dim, types] of Object.entries(DIMENSION_TYPE_MAP)) {
-    if (types.includes(postType)) dims.push(dim)
-  }
-  return dims
+// ============================================
+// D45: 钩子口诀库（按 dim 分，每个 5 个钩子示例）
+// ============================================
+export const HOOK_HINTS: Record<Dim, string> = {
+  A: `同色系自拍："本周主题色蓝色 → 蓝色西装自拍 + 蓝色背景咖啡馆"
+L 型朋友圈："连续 3 张横图形成 L 视觉"
+倒计时海报："倒计时 3 天 / 2 天 / 1 天橙色系方块"
+裸拍产品图："胶原蛋白瓶裸拍 + 浅灰底（不贴海报）"
+节日应景照："12 月 24 日拍一套圣诞照配文案"`,
+  B: `效果对比："30 天前后对比图 + 数据描述"
+用户反馈："客户说皮肤好截图 + 红框标注关键词"
+业绩凡尔赛："正在喝鸡汤，叮铃铃微信到账 3720"
+圈层背书："最近收到好多朋友的赠书：sponsor/陈玉琪/..."
+考察过程："我自费去上海做尽职调查"`,
+  C: `痛点 5 段式："人群画像+场景冲突+隐藏情绪+Why+金句"
+对话公式："你以为给男人生孩子他就爱你一辈子吗？其实他只看到你越来越垮的脸"
+互动："你怎么看？评论区扣字让我看到你"
+福利互动："本条点赞第 28 位送神秘福利"
+软广改写："睡前讲个故事...白雪公主问魔镜"`,
+  D: `5 要素自我介绍："我做私域营销 8 年，累计营收一个亿..."
+凡尔赛："我考过了注会、注册管理会计师、国际会计师"
+90% 筛选："90% 的人不是我的客户，不要年收入 100 万以下的"
+我是来找人的："我不是来销售的，我是来找人的"
+立边界："所有机会都有窗口期，错过就拍大腿"`,
+  E: `500 天坚持："我已经坚持早起 500 天" + 改变
+小确幸："今天下楼买三明治，碰见个姑娘夸我皮肤好"
+至暗时刻："我二姨得了癌症在医院的时候..."
+旅居："在这个京郊小院子最舒服的时候是躺在沙发上..."
+故事开头："那是一年的冬天..."`,
+  F: `反认知金句："不好意思的本质是一种自私"
+不是 X 而是 Y："創業第一桶金靠的不是管理，而是能量"
+三流二流一流："三流卖产品二流卖理念一流卖自己"
+数字型："成交成功率 70% 取决于销售前的准备，30% 靠临场发挥"
+重新定义："所谓勇敢不是不害怕，而是能跟恐惧前行"`,
+  G: `婚姻趣事："今天跟老公吃饭，假装很生气凡尔赛"
+求互动："扣 1 我私聊"
+卖货连载 8 步："需求→体验期→结果→求推荐→案例→考察→展示→正式出道"
+辞职连载："我发了选择题→我放弃 70 万年薪..."
+推产品 10 步："我月入 4 万你想不想要？→这事儿从 8 月说起"`,
 }
 
 // ============================================
-// D37: 周内比重可调（user 可改 early/mid/weekend 权重）
+// D45: 5 段 base 调性（D55-3 5 段最终版：早 F / 午 G / 傍 B / 晚 G+连载 / 夜 E）
+// 上面 SLOT_TONAL_WEIGHTS 已经是按 5 段 + 7 dim 算的（不需再单独抽常量）
 // ============================================
-
-// D37: 加载 user 自己的 weekday 权重（带降级到 D36 默认）
-export async function loadWeekdayWeights(
-  env: { DB?: D1Database },
-  userId: string
-): Promise<typeof WEEKDAY_PHASE_WEIGHTS> {
-  if (!env.DB) return WEEKDAY_PHASE_WEIGHTS
-  try {
-    const row = await env.DB.prepare(
-      "SELECT weekday_weights_json FROM user_settings WHERE user_id = ?"
-    ).bind(userId).first<{ weekday_weights_json: string | null }>()
-    if (row?.weekday_weights_json) {
-      const parsed = JSON.parse(row.weekday_weights_json)
-      // 浅合并：用户配置覆盖默认
-      return {
-        early:   { ...WEEKDAY_PHASE_WEIGHTS.early,   ...(parsed.early   || {}) },
-        mid:     { ...WEEKDAY_PHASE_WEIGHTS.mid,     ...(parsed.mid     || {}) },
-        weekend: { ...WEEKDAY_PHASE_WEIGHTS.weekend, ...(parsed.weekend || {}) },
-      }
-    }
-    return WEEKDAY_PHASE_WEIGHTS
-  } catch {
-    return WEEKDAY_PHASE_WEIGHTS
-  }
-}
-
-// ============================================
-// D42-E: "💡 明日建议" 纯函数（不依赖 D1，给 today.ts 复用 seed 权重算法）
-// 输入：date + 主题月 + weekday 权重 → 输出 4 段 top1/top2 + 钩子建议
-// ============================================
-
-// D45: 钩子口诀库（每类型 5 个钩子示例，来自课程 7 场景）
-// 渲染：computeDaySuggestions 取首行；today.ts /today 卡片提示也用首行
-export const HOOK_HINTS: Record<string, string> = {
-  '干货': `反认知金句："你以为的 X = 实际是 Y"（11 公式之一）
-人群画像："35 岁 / 工资倒挂 / 被裁员 / 房贷压顶的你，看到这条算我提醒你"
-场景冲突："昨天朋友跟我哭诉：明明很努力，身边人却比自己好太多"
-隐藏情绪："你说累的不是工作，是看着别人涨薪你原地踏步"
-谈单句式："明明很想要，但就是下不了决心。你是不是最近心里有点不足？"`,
-
-  '生活': `小确幸："今天 XXX，让我想起..."（配高颜值生活照）
-至暗时刻："30 天前 XXX，现在 XXX"（生活版反差钩子）
-幽默段子："刚才 XXX，差点把我笑死（配剧本式场景）"
-自嘲自黑："我就是那种...的人，你们身边有吗？"
-观后感："刚看完《XXX》，有句话扎到我了：..."`,
-
-  '客户': `客户原话开场："XXX 跟我说：'...'"（配客户反馈截图）
-结果前置："21 天收款 188 万，你想不想要？"
-之前多惨："之前被坑一万，啥都没学到"
-圈人群："如果你也是 XX 岁 / XX 行业 / XX 阶段，这篇必看"
-理念前置："今天不卖产品，只讲一个我用了 5 年的理念..."`,
-
-  '互动': `场景提问："你们有没有遇到 XXX？评论区扣字让我看到你"
-福利互动："本条点赞第 28 位/38 位，送《100 个赚钱锦囊》"
-观点型："XX 这件事你怎么看？站队 A 扣 1，站队 B 扣 2"
-生活话题："今天做的 XXX，你们也这样做吗？评论区见"
-钩子结尾："评论区扣'想'我私聊发《XXX 资料》"`,
-
-  '软广': `痛点场景："如果你也 XXX，那你一定要看..."
-故事开场："白雪公主问魔镜：谁是这世上最美的女人？（魔镜回答 → 引出产品）"
-反差钩子："30 天前 XXX，现在 XXX（用产品改变）"
-场景描述："早上 6 点的厨房，我拿出 XXX...（产品自然出现）"
-打比方："这款面膜好用到什么程度？好到...（夸张比喻）"`,
-
-  '复盘': `反差钩子："30 天前 XXX，现在 XXX"
-结果前置："21 天收款 188 万，我是怎么做到的？"
-踩坑故事："那一年我亏了 XXX 万，学到了..."
-年轮开场："我的 7 年里，XXX 那年最关键"
-复盘总结："本月写了 XXX 条朋友圈，数据最好的是..."`,
-
-  '休息': `放空："今天不想说话，放张图，大家周末愉快"
-心情："今天天气 XXX，心情也 XXX"
-感谢："感谢 XXX 给我点的赞，你们是动力"
-周末："周六早上 8 点，一杯咖啡，一页书"`,
-}
-
-// 4 段 base 调性（D52 严格按课程"日排模板"对齐）
-// 课程口诀（每日.md）：
-//   早 7-9   情绪/思想  思想维度 + 生活维度  → 晨间感悟/小确幸/价值观金句
-//   午 12-14 专业/观赏  专业维度 + 观赏价值  → 痛点拆解/用户案例/干货结构
-//   晚 20-22 关系/互动  关系维度 + 情绪价值  → 连载故事/社群互动/报喜复盘/软广种草
-//   夜 22:30 反思/收尾  (课程没明说, 偏复盘+互动+休息)
-// 7 维度 → 7 type 映射（D36 DIMENSION_TYPE_MAP）:
-//   思想=[干货,复盘]  生活=[生活,休息]  专业=[干货,客户,软广]  关系=[互动,软广]  原生=[生活,互动]  链接=[互动,软广]
-export const SLOT_TONAL_WEIGHTS: Record<SlotId, Record<string, number>> = {
-  // 早: 思想(50%)+生活(50%) → 生活排前(晨间感悟/小确幸) + 干货(思想)/复盘(思想) 并列
-  morning: { "生活": 0.35, "干货": 0.20, "复盘": 0.20, "休息": 0.10, "客户": 0.10, "互动": 0.05 },
-  // 午: 专业(60%)+原生(20%) → 干货排前(专业) + 客户(专业案例) + 软广(专业种草)
-  noon:    { "干货": 0.30, "客户": 0.25, "软广": 0.15, "互动": 0.10, "生活": 0.08, "复盘": 0.07, "休息": 0.05 },
-  // 晚: 关系(60%)+情绪(40%) → 互动排前(关系) + 软广(关系/种草) + 复盘(情绪/报喜) + 客户(情绪/故事)
-  evening: { "互动": 0.25, "软广": 0.20, "复盘": 0.20, "客户": 0.15, "生活": 0.10, "干货": 0.10 },
-  // 夜: 反思+收尾 → 复盘排前 + 互动 + 休息（不打扰）
-  night:   { "复盘": 0.35, "互动": 0.20, "休息": 0.15, "干货": 0.10, "生活": 0.10, "客户": 0.05, "软广": 0.05 },
-}
-
-// 周末(D52): 保持"放松"调性但仍按课程日排：早=生活/休息优先, 午=生活/互动, 晚=互动/软广, 夜=休息/复盘
-export const WEEKEND_TONAL: Record<SlotId, Record<string, number>> = {
-  morning: { "生活": 0.40, "休息": 0.25, "干货": 0.10, "复盘": 0.10, "客户": 0.10, "互动": 0.05 },
-  noon:    { "生活": 0.30, "互动": 0.20, "休息": 0.15, "客户": 0.10, "干货": 0.10, "软广": 0.10, "复盘": 0.05 },
-  evening: { "互动": 0.25, "软广": 0.20, "生活": 0.20, "客户": 0.15, "干货": 0.10, "复盘": 0.10 },
-  night:   { "休息": 0.30, "复盘": 0.25, "生活": 0.20, "互动": 0.15, "干货": 0.10 },
-}
 
 export interface SlotSuggestion {
-  type: string          // top1 推荐 type
-  type2: string         // 备选 top2
+  dim: Dim              // top1 推荐 dim（A-G）
+  dim2: Dim             // 备选 top2
   weight1: number       // top1 权重（百分比 0-100）
   weight2: number       // top2 权重
-  hookHint: string      // 钩子口诀
-  topDims: string[]     // 这个 type 关联的 7 维度
-  // D46: 完整排序（top1, top2, top3, ...）给"🔄 换"按钮循环用
-  topN: Array<{ type: string; weight: number }>
+  hookHint: string      // 钩子口诀（首行）
+  // 完整 topN 列表（D46：给"🔄 换"按钮循环用）
+  topN: Array<{ dim: Dim; weight: number }>
+  // D55: 顶层推荐 category_id（来自 categories 表）
+  categoryId?: string
+  categoryName?: string
 }
 
 export interface DaySuggestion {
@@ -440,14 +242,14 @@ export interface DaySuggestion {
   monthPhase: { phase: 1|2|3; label: string; cycleIndex: number; locked: boolean; weights: Record<string, number> }
   weekdayPhase: 'early' | 'mid' | 'weekend'
   slots: Record<SlotId, SlotSuggestion>
-  // 整日最推荐 = 4 段 top1 weight1 之和最大的 type
-  dayTopType: string
+  // 整日最推荐 = 5 段 top1 weight1 之和最大的 dim
+  dayTopDim: Dim
   dayTopHint: string
 }
 
 const WEEKDAY_CN = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
-const DEFAULT_MONTH_W = { '干货': 0.15, '生活': 0.15, '客户': 0.14, '互动': 0.14, '软广': 0.14, '复盘': 0.14, '休息': 0.14 }
+const DEFAULT_MONTH_W: Record<Dim, number> = { A: 0.14, B: 0.14, C: 0.14, D: 0.15, E: 0.14, F: 0.15, G: 0.14 }
 
 export function computeDaySuggestions(
   date: string,
@@ -461,37 +263,33 @@ export function computeDaySuggestions(
   const weekdayPhase = getWeekdayPhase(weekday)
   const weekTheme = getWeeklyTheme(date, null)
   const monthPhase = getMonthlyPhase(date.slice(0, 7), null)
-  const monthW = themeMonth?.weights || DEFAULT_MONTH_W
+  const monthW = (themeMonth?.weights || DEFAULT_MONTH_W) as Record<Dim, number>
 
-  // 4 段各自算
+  // 5 段各自算
   const slots: Record<SlotId, SlotSuggestion> = {} as Record<SlotId, SlotSuggestion>
   for (const meta of SLOTS) {
     const slot = meta.id
-    // D44: base 已经是按课程口诀的 (noon = 专业+案例 干货+客户), 不再需要特殊覆盖
     const base = isWeekend ? WEEKEND_TONAL[slot] : SLOT_TONAL_WEIGHTS[slot]
-    const weekW = weekTheme.weights
-    const phaseW = weekdayWeights[weekdayPhase]
-    // 联合：50/20/20/10
-    const combined: Record<string, number> = {}
-    for (const t of ROTATION) {
-      combined[t] = (base[t] || 0) * 0.5 + (monthW[t] || 0) * 0.2 + (weekW[t] || 0) * 0.2 + (phaseW[t] || 0) * 0.1
+    const weekW = weekTheme.weights as Record<Dim, number>
+    const phaseW = weekdayWeights[slot] || weekdayWeights
+    // 联合：base 50% + month 20% + week 20% + weekday 10%
+    const combined: Record<Dim, number> = {} as Record<Dim, number>
+    for (const d of DIM_IDS) {
+      combined[d] = (base[d] || 0) * 0.5 + (monthW[d] || 0) * 0.2 + (weekW[d] || 0) * 0.2 + (phaseW[d] || 0) * 0.1
     }
     // 排序取 top2
-    const sorted = (Object.entries(combined) as [string, number][]).sort((a, b) => b[1] - a[1])
-    const [t1, w1] = sorted[0] || ['休息', 0]
-    const [t2, w2] = sorted[1] || ['休息', 0]
-    const topDims = reverseDimensionMap(t1)
-    // D45: HOOK_HINTS 现在是多行（5 个钩子），卡片只显示首行（最常用的那个）
-    const firstHook = (HOOK_HINTS[t1] || '').split('\n').find(l => l.trim()) || ''
-    // D46: 完整 topN 列表给"🔄 换"按钮循环
-    const topN = sorted.map(([type, w]) => ({ type, weight: Math.round(w * 100) }))
+    const sorted = (Object.entries(combined) as [Dim, number][]).sort((a, b) => b[1] - a[1])
+    const [d1, w1] = sorted[0] || ['A', 0]
+    const [d2, w2] = sorted[1] || ['A', 0]
+    // 钩子口诀取首行
+    const firstHook = (HOOK_HINTS[d1] || '').split('\n').find(l => l.trim()) || ''
+    const topN = sorted.map(([dim, w]) => ({ dim, weight: Math.round(w * 100) }))
     slots[slot] = {
-      type: t1,
-      type2: t2,
+      dim: d1,
+      dim2: d2,
       weight1: Math.round(w1 * 100),
       weight2: Math.round(w2 * 100),
       hookHint: firstHook,
-      topDims,
       topN,
     }
   }
@@ -500,11 +298,10 @@ export function computeDaySuggestions(
   const dayTopScore: Record<string, number> = {}
   for (const meta of SLOTS) {
     const s = slots[meta.id]
-    dayTopScore[s.type] = (dayTopScore[s.type] || 0) + s.weight1
+    dayTopScore[s.dim] = (dayTopScore[s.dim] || 0) + s.weight1
   }
-  const dayTopEntry = (Object.entries(dayTopScore) as [string, number][]).sort((a, b) => b[1] - a[1])[0] || ['休息', 0]
-  // D45: dayTopHint 也取首行
-  const dayTopFirstHook = (HOOK_HINTS[dayTopEntry[0]] || '').split('\n').find(l => l.trim()) || ''
+  const dayTopEntry = (Object.entries(dayTopScore) as [string, number][]).sort((a, b) => b[1] - a[1])[0] || ['A', 0]
+  const dayTopFirstHook = (HOOK_HINTS[dayTopEntry[0] as Dim] || '').split('\n').find(l => l.trim()) || ''
 
   return {
     date,
@@ -515,7 +312,181 @@ export function computeDaySuggestions(
     monthPhase,
     weekdayPhase,
     slots,
-    dayTopType: dayTopEntry[0],
+    dayTopDim: dayTopEntry[0] as Dim,
     dayTopHint: dayTopFirstHook,
+  }
+}
+
+// ============================================
+// D37: 加载 user 自己的 weekday 权重
+// ============================================
+export async function loadWeekdayWeights(
+  env: { DB?: D1Database },
+  userId: string
+): Promise<typeof WEEKDAY_PHASE_WEIGHTS> {
+  if (!env.DB) return WEEKDAY_PHASE_WEIGHTS
+  try {
+    const row = await env.DB.prepare(
+      "SELECT weekday_weights_json FROM user_settings WHERE user_id = ?"
+    ).bind(userId).first<{ weekday_weights_json: string | null }>()
+    if (row?.weekday_weights_json) {
+      const parsed = JSON.parse(row.weekday_weights_json)
+      return {
+        early:   { ...WEEKDAY_PHASE_WEIGHTS.early,   ...(parsed.early   || {}) },
+        mid:     { ...WEEKDAY_PHASE_WEIGHTS.mid,     ...(parsed.mid     || {}) },
+        weekend: { ...WEEKDAY_PHASE_WEIGHTS.weekend, ...(parsed.weekend || {}) },
+      }
+    }
+    return WEEKDAY_PHASE_WEIGHTS
+  } catch {
+    return WEEKDAY_PHASE_WEIGHTS
+  }
+}
+
+// ============================================
+// D55: 加载 categories 表（顶层分类 + AI prompt 映射）
+// ============================================
+export interface CategoryRow {
+  id: string
+  dim: Dim
+  category: string
+  subcategory: string
+  name: string
+  description: string
+  slot: SlotId
+  slot_secondary: string | null  // JSON array
+  ai_prompt_id: string
+  ai_prompt_focus: string
+  sort_order: number
+  is_active: number
+  created_at: number
+  updated_at: number | null
+}
+
+export interface FrameRow {
+  id: string
+  category_id: string
+  code: string
+  name: string
+  structure: string
+  example: string
+  image_hint: string
+  image_source: string
+  slot: SlotId
+  difficulty: 'beginner' | 'intermediate' | 'advanced'
+  tags: string
+  sort_order: number
+  is_active: number
+  created_at: number
+  updated_at: number | null
+}
+
+export async function loadCategories(
+  env: { DB?: D1Database },
+  dim?: Dim
+): Promise<CategoryRow[]> {
+  if (!env.DB) return []
+  try {
+    const sql = dim
+      ? "SELECT * FROM categories WHERE dim = ? AND is_active = 1 ORDER BY sort_order ASC, id ASC"
+      : "SELECT * FROM categories WHERE is_active = 1 ORDER BY dim ASC, sort_order ASC, id ASC"
+    const stmt = env.DB.prepare(sql)
+    const result = dim ? await stmt.bind(dim).all<CategoryRow>() : await stmt.all<CategoryRow>()
+    return result.results || []
+  } catch {
+    return []  // migration 还没跑
+  }
+}
+
+export async function loadFramesByCategory(
+  env: { DB?: D1Database },
+  categoryId: string
+): Promise<FrameRow[]> {
+  if (!env.DB) return []
+  try {
+    const result = await env.DB.prepare(
+      "SELECT * FROM frames WHERE category_id = ? AND is_active = 1 ORDER BY sort_order ASC, id ASC"
+    ).bind(categoryId).all<FrameRow>()
+    return result.results || []
+  } catch {
+    return []
+  }
+}
+
+export async function loadTopCategoryForDim(
+  env: { DB?: D1Database },
+  dim: Dim,
+  slot?: SlotId
+): Promise<CategoryRow | null> {
+  if (!env.DB) return null
+  try {
+    let sql = "SELECT * FROM categories WHERE dim = ? AND is_active = 1"
+    const params: unknown[] = [dim]
+    if (slot) {
+      sql += " AND (slot = ? OR slot_secondary LIKE ?)"
+      params.push(slot, `%"${slot}"%`)
+    }
+    sql += " ORDER BY sort_order ASC LIMIT 1"
+    const row = await env.DB.prepare(sql).bind(...params).first<CategoryRow>()
+    return row
+  } catch {
+    return null
+  }
+}
+
+// ============================================
+// 工具函数
+// ============================================
+export function isDim(s: string): s is Dim {
+  return (DIM_IDS as readonly string[]).includes(s)
+}
+export function isSlot(s: string): s is SlotId {
+  return (SLOT_IDS as readonly string[]).includes(s)
+}
+export function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+export function addDays(d: Date, n: number): Date {
+  const x = new Date(d)
+  x.setDate(x.getDate() + n)
+  return x
+}
+
+// D29+ 段配置解析（保持原样：4 段 → 5 段扩展，但 resolveEnabledSlots 仍可工作）
+export function resolveEnabledSlots(
+  settings: { default_slots_per_day: number; slot_config_json: string | null } | null,
+  date: string
+): SlotId[] {
+  if (settings?.slot_config_json) {
+    try {
+      const m = JSON.parse(settings.slot_config_json)
+      if (Array.isArray(m._default)) {
+        if (Array.isArray(m[date])) return m[date] as SlotId[]
+        const valid = (m._default as unknown[]).filter(
+          (s): s is SlotId => typeof s === "string" && (SLOT_IDS as readonly string[]).includes(s)
+        )
+        if (valid.length > 0) return valid
+      }
+      if (Array.isArray(m[date])) return m[date] as SlotId[]
+    } catch {}
+  }
+  const n = settings?.default_slots_per_day
+  if (n && n > 0 && n < 5) return SLOTS.slice(0, Math.min(5, n)).map(s => s.id)
+  return SLOTS.map(s => s.id)
+}
+
+export async function loadEnabledSlots(
+  env: { DB?: D1Database },
+  userId: string,
+  date: string
+): Promise<SlotId[]> {
+  if (!env.DB) return ["morning"]
+  try {
+    const row = await env.DB.prepare(
+      "SELECT default_slots_per_day, slot_config_json FROM user_settings WHERE user_id = ?"
+    ).bind(userId).first<{ default_slots_per_day: number; slot_config_json: string | null }>()
+    return resolveEnabledSlots(row, date)
+  } catch {
+    return ["morning"]
   }
 }

@@ -2,8 +2,12 @@
 // POST /api/ai/draft
 // AI 帮写：公共公式 + 我的素材 → 3 条候选朋友圈文案
 //
-// 输入：{ todayType: '干货'|'生活'|... , addon?: '今天想加的内容' }
+// 输入：{ todayDim: 'A'|'B'|'C'|'D'|'E'|'F'|'G', categoryId?: 'A1-1'|'B2-1'|... , addon?: '今天想加的内容' }
 // 输出：{ drafts: [str, str, str], model: string, used_input_tokens?: number }
+//
+// D55 切换：
+// - todayType（7 type:干货/生活/客户/互动/软广/复盘/休息）→ todayDim（7 维度 A-G）
+// - 拼 prompt 时按 dim 从 categories+frames 表查对应框架，避免泛泛而写
 //
 // 实现：
 // 1. 查当前用户的 intros / cases / quotes / formula_templates（D1）
@@ -47,12 +51,13 @@ const PUBLIC_FORMULAS = `## 公共公式速查（7 个，简版）
 7. 互动提问：场景+灵魂提问+引导回应`
 
 // ============================================
-// 拼 prompt
+// 拼 prompt（D55 彻底 dim：按 dim 注入对应 frameworks）
 // ============================================
 async function buildPrompt(
   env: Env,
   userId: string,
-  todayType: string,
+  todayDim: string,
+  categoryId: string | undefined,
   addon: string | undefined
 ): Promise<string> {
   if (!env.DB) throw new CrudError("D1 未配置", 500)
@@ -80,16 +85,15 @@ async function buildPrompt(
   const weekTheme = getWeeklyTheme(weekStartStr, null)
   const monthPhase = getMonthlyPhase(todayStr.slice(0, 7), null)
 
-  // 7 维度本周已发统计（找最低的 2 个维度）
+  // D55: 7 维度本周已发统计（从 schedule.dim 字段直接读，不再走 reverseDimensionMap）
   const weekRows = await env.DB.prepare(
-    "SELECT post_type FROM schedule WHERE user_id = ? AND date >= ? AND date <= ?"
-  ).bind(userId, weekStartStr, todayStr).all<{ post_type: string }>()
+    "SELECT dim FROM schedule WHERE user_id = ? AND date >= ? AND date <= ? AND dim IS NOT NULL"
+  ).bind(userId, weekStartStr, todayStr).all<{ dim: string }>()
+  const { DIMS, DIM_IDS, DIM_PROMPT, HOOK_HINTS } = await import("../../lib/schedule-constants")
   const dimCounts: Record<string, number> = {}
-  for (const dim of Object.keys(DIMENSION_TYPE_MAP)) dimCounts[dim] = 0
+  for (const d of DIM_IDS) dimCounts[d] = 0
   for (const r of weekRows.results || []) {
-    for (const dim of reverseDimensionMap(r.post_type)) {
-      dimCounts[dim] = (dimCounts[dim] || 0) + 1
-    }
+    dimCounts[r.dim] = (dimCounts[r.dim] || 0) + 1
   }
   const sortedDims = Object.entries(dimCounts).sort((a, b) => a[1] - b[1])
   const lowDims = sortedDims.slice(0, 2).map(([d, n]) => `${d}(${n})`).join('、')
@@ -127,7 +131,35 @@ async function buildPrompt(
   // D54: 子主题小标签（如"📍 场景 D 痛点具象化"），让 AI 写得更具体
   const subthemeBlock = subtheme ? `\n### D54 子主题方向\n**${subtheme}** — 围绕这个具体小主题写，不要泛泛而谈` : ""
 
-  // D40: 本周主题 + 月阶段 + 7 维度提示 合并到任务段
+  // D55: 注入 dim-specific 框架（从 categories + frames 表查）
+  let categoryBlock = ""
+  let frameBlock = ""
+  if (categoryId && env.DB) {
+    try {
+      const cat = await env.DB.prepare(
+        "SELECT id, dim, category, subcategory, name, description, ai_prompt_focus FROM categories WHERE id = ? AND is_active = 1"
+      ).bind(categoryId).first<{ id: string; dim: string; category: string; subcategory: string; name: string; description: string; ai_prompt_focus: string }>()
+      if (cat) {
+        categoryBlock = `\n### D55 今日小类（精准方向）\n维度 ${cat.dim} · ${cat.category} · ${cat.subcategory}（${cat.description}）\n提示重点：${cat.ai_prompt_focus || "无"}`
+      }
+      const frames = await env.DB.prepare(
+        "SELECT id, name, structure, example, image_hint FROM frames WHERE category_id = ? AND is_active = 1 ORDER BY sort_order ASC LIMIT 3"
+      ).bind(categoryId).all<{ id: string; name: string; structure: string; example: string; image_hint: string }>()
+      if (frames.results && frames.results.length > 0) {
+        frameBlock = `\n### D55 今日框架（3 个范例）\n` + frames.results.map(f =>
+          `- [${f.id}] ${f.name}（${f.structure || "无"}）：${truncate(f.example, 200)}${f.image_hint ? ` · 配图：${f.image_hint}` : ''}`
+        ).join("\n")
+      }
+    } catch {
+      // migration 还没跑 → 忽略
+    }
+  }
+  // HOOK_HINTS 按 dim 取首行作为快速钩子
+  const dimHook = (HOOK_HINTS[todayDim] || '').split('\n').find(l => l.trim()) || ''
+  const dimName = DIMS.find(d => d.id === todayDim)?.name || todayDim
+  const aiPromptId = DIM_PROMPT[todayDim] || 'P12'
+
+  // D55 拼 prompt（彻底 dim：按 dim 注入 frameworks + categories）
   const prompt = `你是"内容营销朋友圈"课程体系下的"文案教练"。根据以下素材，为用户写 3 条今日朋友圈候选文案。
 
 ${PUBLIC_FORMULAS}
@@ -135,19 +167,21 @@ ${PUBLIC_FORMULAS}
 ====================================
 用户素材
 ====================================
-${introsBlock}${casesBlock}${quotesBlock}${formulasBlock}${addonBlock}${subthemeBlock}
+${introsBlock}${casesBlock}${quotesBlock}${formulasBlock}${addonBlock}${subthemeBlock}${categoryBlock}${frameBlock}
 
 ====================================
-今日任务（含 D40: 本周主题 + 月阶段 + 7 维度 + D54 子主题）
+今日任务（D55 彻底 dim）
 ====================================
-- 今日类型：**${todayType}**
+- 今日维度：**${todayDim} ${dimName}**
+- 调用的 AI prompt：**${aiPromptId}**（${aiPromptId === todayDim ? "已自动匹配" : "可参考"}）
+- 今日钩子口诀：${dimHook}
 ${subtheme ? `- D54 子主题：${subtheme}（这是重点方向，每条都要扣住这个具体小主题）` : ''}
 - 本周主题：${weekTheme.label}（${weekTheme.cycleIndex + 1}/4 周）—— 重点发 ${weekTypeFocus}
 - 月阶段：${monthPhase.label}（${monthPhase.cycleIndex}/3 月）
 - 7维度本周已发：${dimSummary} → 建议多发：${lowDims}
 - 写 3 条候选（80-200字，\`---END---\` 分隔），第一人称、口语化、有"我"有"你"、不强推销
 - 优先用"客户案例"和"金句库"具体内容；缺素材可临场编，但语气要像用户本人
-- 如有加量（addon），按加量优先；类型与本周主题贴合时优先采用
+- 如有加量（addon），按加量优先；维度与本周主题贴合时优先采用
 - 不要编号、不要"以下是"、"选项1"、"第一条"等提示语
 
 ====================================
@@ -248,35 +282,71 @@ export async function onRequestPost(ctx: {
 }): Promise<Response> {
   try {
     const user = getUser(ctx) as User
-    const body = await readJson<{ todayType?: string; addon?: string; slot?: string; subtheme?: string }>(ctx.request)
-    const todayType = String(body.todayType || "干货").trim()
+    const body = await readJson<{
+      todayDim?: string       // D55: 'A'/'B'/'C'/'D'/'E'/'F'/'G'（替代旧 todayType）
+      todayType?: string      // 兼容旧字段：自动映射到 dim
+      categoryId?: string     // D55: 'A1-1' / 'B2-3' ...（来自 categories 表）
+      addon?: string
+      slot?: string
+      subtheme?: string
+    }>(ctx.request)
+
+    // D55: dim 解析（优先 todayDim，回退到 todayType 映射）
+    const { DIM_IDS, isDim } = await import("../../lib/schedule-constants")
+    const oldTypeToDim: Record<string, string> = {
+      '干货': 'F', '生活': 'E', '客户': 'B', '互动': 'G', '软广': 'C', '复盘': 'F', '休息': 'E',
+    }
+    let todayDim = ''
+    if (body.todayDim && isDim(body.todayDim)) {
+      todayDim = body.todayDim
+    } else if (body.todayType) {
+      todayDim = oldTypeToDim[body.todayType] || 'F'
+    } else {
+      todayDim = 'F'  // 默认 F 思想
+    }
+    const categoryId = body.categoryId ? String(body.categoryId).trim() : undefined
     const addon = body.addon ? String(body.addon).trim() : undefined
     const slot = body.slot ? String(body.slot) : "morning"
     const subtheme = body.subtheme ? String(body.subtheme).trim() : undefined
     if (!isSlot(slot)) {
-      throw new CrudError(`slot 必须是 morning/noon/evening/night，当前：${slot}`, 400)
+      throw new CrudError(`slot 必须是 morning/noon/evening/late/night，当前：${slot}`, 400)
     }
 
-    const prompt = await buildPrompt(ctx.env, user.id, todayType, addon)
+    const prompt = await buildPrompt(ctx.env, user.id, todayDim, categoryId, addon)
     const text = await callMiniMax(prompt, ctx.env)
     const drafts = parseDrafts(text)
 
     // 兜底：保证有 3 条（不足的用空字符串占位）
     while (drafts.length < 3) drafts.push("")
 
-    // 写入 ai_drafts 历史表
+    // D55: 写 ai_drafts 历史表（保留 today_type 兼容，加 today_dim + category_id）
     let draftId: string | null = null
     if (ctx.env.DB) {
       draftId = crypto.randomUUID()
-      await ctx.env.DB.prepare(
-        `INSERT INTO ai_drafts (id, user_id, date, slot, today_type, addon, draft_1, draft_2, draft_3, model, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        draftId, user.id, ymd(new Date()), slot, todayType, addon || null,
-        drafts[0], drafts[1], drafts[2],
-        ctx.env.MINIMAX_MODEL || "MiniMax-M3",
-        Date.now()
-      ).run()
+      try {
+        // D55+ 完整 schema（加 today_dim + category_id）
+        await ctx.env.DB.prepare(
+          `INSERT INTO ai_drafts (id, user_id, date, slot, today_dim, category_id, today_type, addon, draft_1, draft_2, draft_3, model, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          draftId, user.id, ymd(new Date()), slot, todayDim, categoryId || null, todayDim,
+          addon || null,
+          drafts[0], drafts[1], drafts[2],
+          ctx.env.MINIMAX_MODEL || "MiniMax-M3",
+          Date.now()
+        ).run()
+      } catch {
+        // 兼容旧 ai_drafts schema（无 today_dim/category_id 列）
+        await ctx.env.DB.prepare(
+          `INSERT INTO ai_drafts (id, user_id, date, slot, today_type, addon, draft_1, draft_2, draft_3, model, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          draftId, user.id, ymd(new Date()), slot, todayDim, addon || null,
+          drafts[0], drafts[1], drafts[2],
+          ctx.env.MINIMAX_MODEL || "MiniMax-M3",
+          Date.now()
+        ).run()
+      }
     }
 
     return json({
