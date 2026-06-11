@@ -11,7 +11,7 @@
 // ============================================
 
 import { getUser, json, jsonError, readJson, CrudError, newId } from "../crud-helper"
-import { isSlot, isDim, type Dim, loadTopCategoryForDim, ymdInTZ } from "../../lib/schedule-constants"
+import { isSlot, isDim, type Dim, type SlotId, loadTopCategoryForDim, ymdInTZ } from "../../lib/schedule-constants"
 
 interface User { id: string }
 
@@ -33,11 +33,13 @@ export async function onRequestPost(ctx: {
 
     // 解析 body（form 或 JSON）
     const ct = (ctx.request.headers.get("Content-Type") || "").toLowerCase()
-    let body: { action?: string; note?: string; draft_id?: string; chosen_index?: number; slot?: string; candidate_type?: string } = {}
+    let body: { action?: string; note?: string; draft_id?: string; chosen_index?: number; slot?: string; candidate_type?: string; dims?: string[] } = {}
     if (ct.includes("application/json")) {
       body = await readJson(ctx.request)
     } else {
       const form = await ctx.request.formData()
+      // D55-17 E: 多维加量 — dims[] 多次或 dims 逗号分隔
+      const dimsRaw = form.getAll("dims").map(String).filter(Boolean)
       body = {
         action: String(form.get("action") || "note"),
         note: form.get("note") ? String(form.get("note")) : undefined,
@@ -45,6 +47,7 @@ export async function onRequestPost(ctx: {
         chosen_index: form.get("chosen_index") ? parseInt(String(form.get("chosen_index"))) : undefined,
         slot: form.get("slot") ? String(form.get("slot")) : undefined,
         candidate_type: form.get("candidate_type") ? String(form.get("candidate_type")) : undefined,
+        dims: dimsRaw.length > 0 ? dimsRaw : undefined,
       }
     }
 
@@ -155,8 +158,39 @@ export async function onRequestPost(ctx: {
            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 1, ?)`
         ).bind(newId(), user.id, today, slot, candDim, tplId, `加量: ${candDim}`, now).run()
       }
+    } else if (action === "multi_add") {
+      // D55-17 E: 多维加量 — 一次提交多个 dim，每个 dim 插一条 sort_order=max+1
+      const dimsInput = body.dims || []
+      const validDims = dimsInput.filter(d => isDim(d)) as Dim[]
+      if (validDims.length === 0) {
+        throw new CrudError("multi_add 至少要 1 个有效 dim", 400)
+      }
+      // 查 max sort_order
+      const maxRow = await ctx.env.DB.prepare(
+        "SELECT MAX(sort_order) AS max_so FROM schedule WHERE user_id = ? AND date = ? AND slot = ?"
+      ).bind(user.id, today, slot).first<{ max_so: number | null }>()
+      let nextSo = (maxRow?.max_so ?? 0) + 1
+      const noteText = body.note ? `加量: ${body.note}` : `加量`
+      for (const d of validDims) {
+        const cat = await loadTopCategoryForDim(ctx.env, d, slot as SlotId)
+        const categoryId = cat?.id || null
+        const tplId = d
+        try {
+          await ctx.env.DB.prepare(
+            `INSERT INTO schedule (id, user_id, date, slot, dim, category_id, post_type, template_id, status, note, sort_order, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+          ).bind(newId(), user.id, today, slot, d, categoryId, d, tplId, noteText, nextSo, now).run()
+        } catch {
+          // 兼容旧 schema
+          await ctx.env.DB.prepare(
+            `INSERT INTO schedule (id, user_id, date, slot, post_type, template_id, status, note, sort_order, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+          ).bind(newId(), user.id, today, slot, d, tplId, noteText, nextSo, now).run()
+        }
+        nextSo++
+      }
     } else {
-      throw new CrudError(`action 必须是 note/posted/skipped/accept_candidate，当前：${action}`, 400)
+      throw new CrudError(`action 必须是 note/posted/skipped/accept_candidate/multi_add，当前：${action}`, 400)
     }
 
     // 表单提交 → 重定向回 /today

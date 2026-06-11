@@ -609,6 +609,16 @@ ${themeCssVar(theme)}
               ${r ? `<button type="submit" name="action" value="posted" class="btn-success">✓ 标记已发</button><button type="submit" name="action" value="skipped" class="btn-muted">— 跳</button>` : `<button type="submit" name="action" value="note" class="btn-secondary">+ 加 1 条加量</button>`}
             </div>
           </form>
+          <details class="multi-add" style="margin-top:8px;">
+            <summary style="cursor:pointer;color:#553c9a;font-size:13px;">📌 D55-17: 多维加量（一次加多个维度）</summary>
+            <form class="multi-add-form" method="POST" action="${escapeHtml(origin)}/api/today/addon" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+              <input type="hidden" name="slot" value="${sid}">
+              <input type="hidden" name="action" value="multi_add">
+              ${DIM_IDS.map(d => `<label class="multi-add-cb" style="display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:14px;cursor:pointer;font-size:12px;background:#fff;"><input type="checkbox" name="dims" value="${d}">${d}</label>`).join('')}
+              <input type="text" name="note" placeholder="备注（可选）" style="flex:1;min-width:120px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">
+              <button type="submit" class="btn-primary" style="padding:4px 12px;font-size:12px;">➕ 批量加</button>
+            </form>
+          </details>
           <div class="ai-zone" data-slot="${sid}">
             ${draft ? `
               <div class="posted-mini">
