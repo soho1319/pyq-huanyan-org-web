@@ -384,8 +384,8 @@ export async function onRequestGet(ctx: {
       } catch {}
     }
   }
-  // D50: 优先用 _default 数组（用户实际勾了哪几段），否则按 N 段推
-  const enabledSlots = enabledSlotsFromJson ?? SLOTS.slice(0, Math.max(1, Math.min(4, defaultSlotsPerDay))).map(s => s.id)
+  // D50: 优先用 _default 数组（用户实际勾了哪几段），否则默认 4 段全勾（每天都要发）
+  const enabledSlots = enabledSlotsFromJson ?? SLOTS.map(s => s.id)
   return renderPage(currentColors, currentTheme, user, msg, enabledSlots, weekdayWeights)
 }
 
@@ -485,7 +485,7 @@ export async function onRequestPost(ctx: {
     for (const sid of SLOT_IDS) {
       if (form.get(`slot_${sid}`)) checkedSlots.push(sid)
     }
-    if (checkedSlots.length === 0) checkedSlots = ["morning"]  // 至少 1 段
+    if (checkedSlots.length === 0) checkedSlots = SLOTS.map(s => s.id)  // D50+: 0 勾 = 默认 4 段全发
     defaultSlotsPerDay = checkedSlots.length
   }
 

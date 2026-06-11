@@ -133,9 +133,12 @@ export function resolveEnabledSlots(
       if (Array.isArray(m[date])) return m[date] as SlotId[]
     } catch {}
   }
-  // 3. 兜底：默认 N 段（D29 行为，向后兼容）
-  const n = Math.max(1, Math.min(4, settings?.default_slots_per_day || 1))
-  return SLOTS.slice(0, n).map(s => s.id)
+  // 3. 兜底：D50+ 默认 4 段全勾（每天都要发）
+  //    向后兼容老 D29 用户：default_slots_per_day=1 仍走 SLOTS.slice(0,1)
+  //    但 default_slots_per_day=4 或没有值（首次注册） → 4 段全开
+  const n = settings?.default_slots_per_day
+  if (n && n > 0 && n < 4) return SLOTS.slice(0, Math.min(4, n)).map(s => s.id)
+  return SLOTS.map(s => s.id)  // 默认 4 段全发
 }
 
 // 安全 wrapper：migration 还没跑时降级到 ['morning']
