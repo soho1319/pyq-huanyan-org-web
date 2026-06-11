@@ -1,79 +1,60 @@
-name:Deploy to Cloudflare Pages + EdgeOne
+name: Deploy to Cloudflare Pages + EdgeOne
 
 "on":
- push:
- branches: [main]
- workflow_dispatch:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
- deploy-cf:
- name:Deploy to Cloudflare Pages (国际站)
- runs-on:ubuntu-latest
- steps:
- - uses:actions/checkout@v4
+  deploy-cf:
+    name: Deploy to Cloudflare Pages (国际站)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
- - name:Setup Node.js
- uses:actions/setup-node@v4
- with:
- node-version:20
- cache:npm
- cache-dependency-path:vendor/quartz/package-lock.json
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
- - name:Install dependencies
- run:|
- cd vendor/quartz
- if [ ! -d "node_modules" ]; then
- npm ci || npm install
- fi
+      - name: Run build.sh (clone Quartz + copy + npx quartz build)
+        run: bash build.sh
 
- - name:Copy custom configs
- run:|
- cp -f quartz.config.ts vendor/quartz/quartz.config.ts
- cp -f quartz.layout.ts vendor/quartz/quartz.layout.ts2>/dev/null || true
- cp -f components/PromptToolbox.tsx vendor/quartz/components/2>/dev/null || true
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          projectName: pyq-huanyan-org
+          directory: vendor/quartz/public
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
- - name:Build
- run:|
- cd vendor/quartz
- npx quartz build
+  deploy-edgeone:
+    name: Deploy to EdgeOne Pages (国内站)
+    runs-on: ubuntu-latest
+    needs: deploy-cf
+    steps:
+      - uses: actions/checkout@v4
 
- - name:Deploy to Cloudflare Pages
- uses:cloudflare/pages-action@v1
- with:
- apiToken:${{ secrets.CF_API_TOKEN }}
- accountId:${{ secrets.CF_ACCOUNT_ID }}
- projectName:pyq-huanyan-org
- directory:vendor/quartz/public
- gitHubToken:${{ secrets.GITHUB_TOKEN }}
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
- deploy-edgeone:
- name:Deploy to EdgeOne Pages (国内站)
- runs-on:ubuntu-latest
- needs:deploy-cf
- steps:
- - uses:actions/checkout@v4
+      - name: Run build.sh
+        run: bash build.sh
 
- - name:Setup Node.js
- uses:actions/setup-node@v4
- with:
- node-version:20
+      - name: Install EdgeOne CLI
+        run: npm install -g edgeone
 
- - name:Install EdgeOne CLI
- run:npm install -g edgeone
+      - name: Deploy to EdgeOne
+        env:
+          TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
+          TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
+        run: |
+          cd vendor/quartz
+          edgeone deploy
 
- - name:Build
- run:|
- cd vendor/quartz
- npx quartz build
-
- - name:Deploy to EdgeOne
- env:
- TENCENTCLOUD_SECRET_ID:${{ secrets.TENCENTCLOUD_SECRET_ID }}
- TENCENTCLOUD_SECRET_KEY:${{ secrets.TENCENTCLOUD_SECRET_KEY }}
- run:|
- cd vendor/quartz
- edgeone deploy
-
- - name:Notify on success
- if:success()
- run:echo "🎉 双站部署完成！https://pyq.huanyan.org"
+      - name: Notify on success
+        if: success()
+        run: echo "🎉 双站部署完成！https://pyq.huanyan.org"
