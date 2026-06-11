@@ -319,43 +319,8 @@ export async function onRequestGet(ctx: {
   }
 }
 
-/* 旧版（保留，注释掉）
-  const html = renderToday({
-    user,
-    todayStr,
-    weekday,
-    scheduleBySlot,
-    addonsBySlot,        // D46
-    draftsBySlot,
-    enabledSlots,
-    introsMap,
-    casesList,
-    quotesList,
-    formulasList,
-    monthSchedule: monthSchedule.results || [],
-    weekData,
-    themeMonth: themeMonthRow,
-    weekTheme,
-    monthPhase,
-    themeTopType,
-    weekTopPosted,
-    weekTopSuggested,
-    dimCounts,
-    lowDims,
-    dimMax,
-    daySuggestion: daySuggestion!,
-    daySuggestionError,
-    todaySuggestion,     // D46
-    todaySuggestionError,// D46
-    origin,
-    colors,
-    theme,
-  })
-
-  return new Response(html, {
-    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
-  })
-}
+/* 旧版（保留，注释掉）— 见 git history d5838b6
+   D55-11 修复:删除以下孤儿 block comment,恢复 renderDaySuggestion 等函数 */
 
 function renderDaySuggestion(
   s: import("./lib/schedule-constants").DaySuggestion,
