@@ -211,3 +211,128 @@ export async function loadWeekdayWeights(
     return WEEKDAY_PHASE_WEIGHTS
   }
 }
+
+// ============================================
+// D42-E: "💡 明日建议" 纯函数（不依赖 D1，给 today.ts 复用 seed 权重算法）
+// 输入：date + 主题月 + weekday 权重 → 输出 4 段 top1/top2 + 钩子建议
+// ============================================
+
+// 钩子口诀（来自课程文档"日排口诀"）
+export const HOOK_HINTS: Record<string, string> = {
+  '干货': '开场用反认知金句："你以为的 X = 实际是 Y"',
+  '生活': '开场用小确幸/至暗："今天 XXX，让我想起..."',
+  '客户': '开场用客户原话："XXX 跟我说..."',
+  '互动': '开场用场景提问："你们有没有遇到 XXX？',
+  '软广': '开场用痛点场景："如果你也 XXX，那你一定要看..."',
+  '复盘': '开场用反差："30 天前 XXX，现在 XXX"',
+  '休息': '放空日：1 张图 + 1 句心情，不强求转化',
+}
+
+// 4 段 base 调性（同 seed.ts SLOT_TONAL_WEIGHTS）
+const SLOT_TONAL_WEIGHTS: Record<SlotId, Record<string, number>> = {
+  morning: { "干货": 0.45, "复盘": 0.25, "客户": 0.15, "互动": 0.05, "生活": 0.05, "软广": 0.03, "休息": 0.02 },
+  noon:    { "互动": 0.40, "生活": 0.30, "客户": 0.10, "干货": 0.10, "复盘": 0.05, "软广": 0.03, "休息": 0.02 },
+  evening: { "软广": 0.40, "客户": 0.25, "干货": 0.15, "生活": 0.10, "复盘": 0.05, "互动": 0.03, "休息": 0.02 },
+  night:   { "复盘": 0.35, "互动": 0.25, "生活": 0.15, "干货": 0.10, "客户": 0.05, "软广": 0.05, "休息": 0.05 },
+}
+
+const WEEKEND_TONAL: Record<SlotId, Record<string, number>> = {
+  morning: { "生活": 0.40, "休息": 0.25, "干货": 0.15, "复盘": 0.10, "客户": 0.05, "互动": 0.03, "软广": 0.02 },
+  noon:    { "生活": 0.40, "互动": 0.30, "休息": 0.15, "干货": 0.05, "客户": 0.05, "复盘": 0.03, "软广": 0.02 },
+  evening: { "软广": 0.30, "客户": 0.25, "生活": 0.20, "互动": 0.10, "干货": 0.05, "复盘": 0.05, "休息": 0.05 },
+  night:   { "复盘": 0.30, "互动": 0.25, "生活": 0.20, "休息": 0.15, "干货": 0.05, "客户": 0.03, "软广": 0.02 },
+}
+
+export interface SlotSuggestion {
+  type: string          // top1 推荐 type
+  type2: string         // 备选 top2
+  weight1: number       // top1 权重（百分比 0-100）
+  weight2: number       // top2 权重
+  hookHint: string      // 钩子口诀
+  topDims: string[]     // 这个 type 关联的 7 维度
+}
+
+export interface DaySuggestion {
+  date: string          // 'YYYY-MM-DD'
+  weekday: number       // 0-6
+  weekdayLabel: string  // '周五'
+  isWeekend: boolean
+  weekTheme: { theme: WeeklyThemeId; label: string; cycleIndex: number; locked: boolean; weights: Record<string, number> }
+  monthPhase: { phase: 1|2|3; label: string; cycleIndex: number; locked: boolean; weights: Record<string, number> }
+  weekdayPhase: 'early' | 'mid' | 'weekend'
+  slots: Record<SlotId, SlotSuggestion>
+  // 整日最推荐 = 4 段 top1 weight1 之和最大的 type
+  dayTopType: string
+  dayTopHint: string
+}
+
+const WEEKDAY_CN = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+const DEFAULT_MONTH_W = { '干货': 0.15, '生活': 0.15, '客户': 0.14, '互动': 0.14, '软广': 0.14, '复盘': 0.14, '休息': 0.14 }
+
+export function computeDaySuggestions(
+  date: string,
+  themeMonth: { theme: string; weights: Record<string, number> } | null,
+  weekdayWeights: typeof WEEKDAY_PHASE_WEIGHTS
+): DaySuggestion {
+  const d = new Date(date + 'T00:00:00')
+  const weekday = d.getDay()
+  const weekdayLabel = WEEKDAY_CN[weekday]
+  const isWeekend = weekday === 0 || weekday === 6
+  const weekdayPhase = getWeekdayPhase(weekday)
+  const weekTheme = getWeeklyTheme(date, null)
+  const monthPhase = getMonthlyPhase(date.slice(0, 7), null)
+  const monthW = themeMonth?.weights || DEFAULT_MONTH_W
+
+  // 4 段各自算
+  const slots: Record<SlotId, SlotSuggestion> = {} as Record<SlotId, SlotSuggestion>
+  for (const meta of SLOTS) {
+    const slot = meta.id
+    const baseRaw = isWeekend ? WEEKEND_TONAL[slot] : SLOT_TONAL_WEIGHTS[slot]
+    // 同 seed.ts: noon 段调性偏"专业/案例"
+    const base = slot === 'noon'
+      ? { '干货': 0.35, '客户': 0.25, '互动': 0.15, '生活': 0.10, '复盘': 0.08, '软广': 0.05, '休息': 0.02 }
+      : baseRaw
+    const weekW = weekTheme.weights
+    const phaseW = weekdayWeights[weekdayPhase]
+    // 联合：50/20/20/10
+    const combined: Record<string, number> = {}
+    for (const t of ROTATION) {
+      combined[t] = (base[t] || 0) * 0.5 + (monthW[t] || 0) * 0.2 + (weekW[t] || 0) * 0.2 + (phaseW[t] || 0) * 0.1
+    }
+    // 排序取 top2
+    const sorted = (Object.entries(combined) as [string, number][]).sort((a, b) => b[1] - a[1])
+    const [t1, w1] = sorted[0] || ['休息', 0]
+    const [t2, w2] = sorted[1] || ['休息', 0]
+    const topDims = reverseDimensionMap(t1)
+    slots[slot] = {
+      type: t1,
+      type2: t2,
+      weight1: Math.round(w1 * 100),
+      weight2: Math.round(w2 * 100),
+      hookHint: HOOK_HINTS[t1] || '',
+      topDims,
+    }
+  }
+
+  // 整日最推荐
+  const dayTopScore: Record<string, number> = {}
+  for (const meta of SLOTS) {
+    const s = slots[meta.id]
+    dayTopScore[s.type] = (dayTopScore[s.type] || 0) + s.weight1
+  }
+  const dayTopEntry = (Object.entries(dayTopScore) as [string, number][]).sort((a, b) => b[1] - a[1])[0] || ['休息', 0]
+
+  return {
+    date,
+    weekday,
+    weekdayLabel,
+    isWeekend,
+    weekTheme,
+    monthPhase,
+    weekdayPhase,
+    slots,
+    dayTopType: dayTopEntry[0],
+    dayTopHint: HOOK_HINTS[dayTopEntry[0]] || '',
+  }
+}
