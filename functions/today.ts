@@ -779,6 +779,50 @@ ${themeCssVar(theme)}
     </section>
   </main>
   <script>
+    // D55-17 F: multi-add 用 fetch + JSON 提交，错误友好提示
+    document.querySelectorAll('form.multi-add-form').forEach(f => {
+      f.addEventListener('submit', async (e) => {
+        e.preventDefault()
+        const slot = f.querySelector('input[name="slot"]').value
+        const note = f.querySelector('input[name="note"]').value
+        const dims = Array.from(f.querySelectorAll('input[name="dims"]:checked')).map(cb => cb.value)
+        // 前端校验：至少 1 个 dim
+        if (dims.length === 0) {
+          alert('请先勾选至少 1 个维度（A-G）再点"批量加"～')
+          // 自动展开 details（如果还合着）
+          const det = f.closest('details')
+          if (det) det.open = true
+          // 高亮未选提示
+          f.querySelectorAll('input[name="dims"]').forEach(cb => {
+            cb.parentElement.style.outline = '2px dashed #f59e0b'
+            setTimeout(() => { cb.parentElement.style.outline = '' }, 1500)
+          })
+          return
+        }
+        const btn = f.querySelector('button[type="submit"]')
+        const orig = btn.textContent
+        btn.disabled = true
+        btn.textContent = '⏳ 加量中...'
+        try {
+          const resp = await fetch('/api/today/addon', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'multi_add', slot, dims, note }),
+          })
+          const data = await resp.json().catch(() => ({}))
+          if (!resp.ok || data.ok === false) {
+            throw new Error(data.error || '提交失败（HTTP ' + resp.status + '）')
+          }
+          // 成功 → 刷新 /today 看新加量
+          window.location.href = '/today'
+        } catch (err) {
+          alert('❌ 多维加量失败：' + err.message)
+          btn.disabled = false
+          btn.textContent = orig
+        }
+      })
+    })
+
     // D29: per-slot AI 帮写
     document.querySelectorAll('.btn-ai-slot').forEach(btn => {
       btn.onclick = async () => {
