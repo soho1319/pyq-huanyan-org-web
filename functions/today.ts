@@ -6,7 +6,8 @@
 
 import { loadUserColors, typeStyle } from "./lib/type-colors"
 import { loadUserTheme, themeCssVar } from "./lib/theme"
-import { SLOTS, SLOT_IDS, TYPE_TIPS, loadEnabledSlots, SlotId, DIMENSION_TYPE_MAP } from "./lib/schedule-constants"
+import { SLOTS, SLOT_IDS, TYPE_TIPS, loadEnabledSlots, SlotId, DIMENSION_TYPE_MAP, computeDaySuggestions, loadWeekdayWeights } from "./lib/schedule-constants"
+import { getThemeWeights } from "./api/theme-month"
 
 interface User {
   id: string
@@ -164,6 +165,28 @@ export async function onRequestGet(ctx: {
   const weekTopSuggested = Math.round(weekTopTotal * (weekTheme.weights[themeTopType] / themeTypeSum) * 0.6)  // 60% 系数软目标
   const monthPhase = getMonthlyPhase(todayStr.slice(0, 7), themeMonthRow?.cycle_index || null)
 
+  // ★ D42-E: 算"明天"建议（用同 D36 4 层权重 + 主题月 + weekday weights）
+  let daySuggestion: import("./lib/schedule-constants").DaySuggestion | null = null
+  let daySuggestionError: string | null = null
+  try {
+    const weekdayW = await loadWeekdayWeights(ctx.env, user.id)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowStr = ymd(tomorrow)
+    const tomorrowMonth = await ctx.env.DB.prepare(
+      "SELECT theme, custom_label, cycle_index FROM theme_months WHERE user_id = ? AND year_month = ?"
+    ).bind(user.id, tomorrowStr.slice(0, 7)).first<{ theme: string; custom_label: string | null; cycle_index: number }>()
+    const tomorrowThemeW = tomorrowMonth ? getThemeWeights(tomorrowMonth.theme, null) : null
+    daySuggestion = computeDaySuggestions(
+      tomorrowStr,
+      tomorrowThemeW ? { theme: tomorrowMonth!.theme, weights: tomorrowThemeW } : null,
+      weekdayW
+    )
+  } catch (err) {
+    daySuggestionError = err instanceof Error ? err.message : String(err)
+    console.error('[D42-E] computeDaySuggestions failed:', err)
+  }
+
   // ★ D40: 算本周 7 维度覆盖（用 post_type 反查人设维度）
   const dimCounts: Record<string, number> = {}
   for (const dim of Object.keys(DIMENSION_TYPE_MAP)) dimCounts[dim] = 0
@@ -204,6 +227,8 @@ export async function onRequestGet(ctx: {
     dimCounts,
     lowDims,
     dimMax,
+    daySuggestion: daySuggestion!,
+    daySuggestionError,
     origin,
     colors,
     theme,
@@ -212,6 +237,49 @@ export async function onRequestGet(ctx: {
   return new Response(html, {
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
   })
+}
+
+function renderDaySuggestion(
+  s: import("./lib/schedule-constants").DaySuggestion,
+  colors: Record<string, { bg: string; fg: string }>
+): string {
+  const slotOrder: SlotId[] = ['morning', 'noon', 'evening', 'night']
+  const slotMeta = SLOTS.find(sl => sl.id === 'morning')! // 用 SLOTS 标签
+  const slotLabelMap: Record<SlotId, string> = { morning: '早 8', noon: '午 12:30', evening: '晚 20', night: '夜 22:30' }
+  const topTypeStyle = (t: string) => `background:${colors[t]?.bg || '#e2e8f0'};color:${colors[t]?.fg || '#1a202c'};`
+
+  return `
+  <section class="card day-suggestion-card">
+    <div class="card-head">
+      <h2>💡 明日建议（${s.date} · ${s.weekdayLabel}${s.isWeekend ? ' · 周末' : ''}）</h2>
+      <span class="muted">提前 1 天规划，按 D36 4 层权重算</span>
+    </div>
+    <div class="ds-theme-row">
+      <span class="theme-week-badge">📌 周主题：<strong>${escapeHtml(s.weekTheme.label)}</strong>（第 ${s.weekTheme.cycleIndex + 1}/4 周）</span>
+      <span class="theme-phase-badge phase-${s.monthPhase.phase}">🎯 月阶段：${escapeHtml(s.monthPhase.label)}（第 ${s.monthPhase.cycleIndex}/3 月）</span>
+      <span class="muted ds-phase">周内比重：<strong>${s.weekdayPhase === 'early' ? '周初' : s.weekdayPhase === 'mid' ? '周中' : '周末'}</strong></span>
+    </div>
+    <div class="ds-day-top">
+      <span class="muted">明日 4 段联合最推 →</span>
+      <span class="ds-day-top-type" style="${topTypeStyle(s.dayTopType)}">${s.dayTopType}</span>
+      <span class="muted">${escapeHtml(s.dayTopHint)}</span>
+    </div>
+    <div class="ds-slots">
+      ${slotOrder.map(sid => {
+        const slot = s.slots[sid]
+        return `
+        <div class="ds-slot">
+          <div class="ds-slot-time">${slotLabelMap[sid]}</div>
+          <div class="ds-slot-type" style="${topTypeStyle(slot.type)}">${slot.type}<span class="ds-weight">${slot.weight1}%</span></div>
+          <div class="ds-slot-alt">备选 <span class="ds-alt-type" style="${topTypeStyle(slot.type2)}">${slot.type2}</span> ${slot.weight2}%</div>
+          <div class="ds-slot-hint">${escapeHtml(slot.hookHint)}</div>
+          <div class="ds-slot-dims">${slot.topDims.map(d => `<span class="ds-dim">${d}</span>`).join(' ')}</div>
+        </div>
+        `
+      }).join('')}
+    </div>
+  </section>
+  `
 }
 
 function renderMonthStrip(
@@ -317,11 +385,13 @@ function renderToday(args: {
   dimCounts: Record<string, number>
   lowDims: string[]
   dimMax: number
+  daySuggestion: import("./lib/schedule-constants").DaySuggestion | null
+  daySuggestionError: string | null
   origin: string
   colors: Record<string, { bg: string; fg: string }>
   theme: { start: string; end: string; solid: string }
 }): string {
-  const { user, todayStr, weekday, scheduleBySlot, draftsBySlot, enabledSlots, introsMap, casesList, quotesList, formulasList, monthSchedule, weekData, themeMonth, weekTheme, monthPhase, themeTopType, weekTopPosted, weekTopSuggested, dimCounts, lowDims, dimMax, origin, colors, theme } = args
+  const { user, todayStr, weekday, scheduleBySlot, draftsBySlot, enabledSlots, introsMap, casesList, quotesList, formulasList, monthSchedule, weekData, themeMonth, weekTheme, monthPhase, themeTopType, weekTopPosted, weekTopSuggested, dimCounts, lowDims, dimMax, daySuggestion, daySuggestionError, origin, colors, theme } = args
   // 向后兼容：保留 postType / templateId / templateName / typeTip（AI 帮写区还引用）
   const firstSlot = enabledSlots[0] || "morning"
   const firstSched = scheduleBySlot[firstSlot] || scheduleBySlot["morning"] || null
@@ -370,10 +440,18 @@ ${themeCssVar(theme)}
       <div class="weekday">${weekday}</div>
     </div>
 
+    ${daySuggestion ? renderDaySuggestion(daySuggestion, colors) : ''}
+    ${daySuggestionError ? `<div style="background:#fed7d7;color:#c53030;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;">[D42-E] 明日建议计算失败：${escapeHtml(daySuggestionError)}</div>` : ''}
+
     <section class="slot-cards-area">
       <div class="card-head-area">
         <h2>📌 今日要发（${enabledSlots.length} 段）</h2>
         <span class="muted">4 段固定：早 8 / 午 12:30 / 晚 20 / 夜 22:30。要几条去 <a href="/my/types">🎨 颜色</a> 配</span>
+      </div>
+      <div class="reseed-today-bar">
+        <button type="button" id="reseedTodayBtn" class="btn-reseed-today">🔄 重新排今天（按当前主题月/周主题）</button>
+        <span class="muted" id="reseedTodayStatus"></span>
+        <span class="muted reseed-hint">已发的不动 · 仅改 pending / skipped</span>
       </div>
       ${enabledSlots.map(sid => {
         const meta = SLOTS.find(s => s.id === sid)!
@@ -702,6 +780,39 @@ ${themeCssVar(theme)}
           }).catch(() => { seedBtn.textContent = '重试'; seedBtn.disabled = false })
       }
     }
+
+    // D41: "重新排今天" 按钮 — overwrite=true 仅 1 天，posted 不动
+    const reseedBtn = document.getElementById('reseedTodayBtn')
+    if (reseedBtn) {
+      reseedBtn.onclick = () => {
+        if (!confirm('按当前主题月/周主题/周内比重重新排今天 4 段？\\n\\n已发（✓）的不动，仅改 待发/跳过的。')) return
+        const status = document.getElementById('reseedTodayStatus')
+        const origText = reseedBtn.textContent
+        reseedBtn.textContent = '⏳ 重排中...'
+        reseedBtn.disabled = true
+        if (status) status.textContent = '调用中'
+        const today = new Date()
+        const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0')
+        fetch('/api/schedule/seed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_date: todayStr, days: 1, overwrite: true }),
+        })
+          .then(r => r.json())
+          .then(data => {
+            const updated = data.updated || 0
+            const skipped = data.skipped || 0
+            if (status) status.textContent = '✅ 已重排（' + updated + ' 段更新 · ' + skipped + ' 段跳过：已发保留）'
+            reseedBtn.textContent = '✓ 已重排'
+            setTimeout(() => location.reload(), 600)
+          })
+          .catch(err => {
+            if (status) status.textContent = '✗ 出错：' + err.message
+            reseedBtn.textContent = origText
+            reseedBtn.disabled = false
+          })
+      }
+    }
   </script>
 </body>
 </html>`
@@ -863,6 +974,28 @@ main { max-width: 760px; margin: 0 auto; padding: 20px; }
 @media (max-width: 640px) { .dim-grid { grid-template-columns: repeat(2, 1fr); } }
 .theme-month-card h2 { color: #553c9a; }
 .theme-month-card a { color: var(--t); }
+.reseed-today-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 12px; background: linear-gradient(135deg, rgba(102,126,234,0.06) 0%, rgba(118,75,162,0.02) 100%); border: 1px dashed rgba(102,126,234,0.3); border-radius: 8px; }
+.btn-reseed-today { padding: 6px 14px; background: #fff; color: var(--t); border: 1px solid var(--t); border-radius: 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn-reseed-today:hover { background: var(--t); color: #fff; }
+.btn-reseed-today:disabled { opacity: 0.6; cursor: not-allowed; }
+.reseed-hint { font-size: 11px; }
+/* D42-E: 明日建议卡片 */
+.day-suggestion-card { background: linear-gradient(135deg, rgba(102,126,234,0.05) 0%, rgba(118,75,162,0.08) 100%); border-color: rgba(102,126,234,0.25); }
+.ds-theme-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; font-size: 13px; }
+.ds-phase { font-size: 12px; }
+.ds-day-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; background: #fff; border: 1px dashed rgba(102,126,234,0.3); border-radius: 8px; font-size: 13px; }
+.ds-day-top-type { padding: 3px 14px; border-radius: 16px; font-weight: 700; font-size: 14px; }
+.ds-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.ds-slot { padding: 10px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
+.ds-slot-time { font-size: 12px; color: #718096; font-weight: 600; margin-bottom: 6px; }
+.ds-slot-type { display: inline-block; padding: 4px 12px; border-radius: 14px; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.ds-weight { font-size: 11px; font-weight: 500; opacity: 0.85; margin-left: 4px; }
+.ds-slot-alt { font-size: 11px; color: #718096; margin-bottom: 6px; }
+.ds-alt-type { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 11px; margin: 0 2px; }
+.ds-slot-hint { font-size: 11px; color: #4a5568; line-height: 1.5; margin-bottom: 6px; padding: 4px 0; border-top: 1px dashed #edf2f7; }
+.ds-slot-dims { display: flex; gap: 4px; flex-wrap: wrap; }
+.ds-dim { font-size: 10px; padding: 1px 6px; background: #edf2f7; color: #4a5568; border-radius: 8px; }
+@media (max-width: 640px) { .ds-slots { grid-template-columns: 1fr; } }
 .addon-form { margin-top: 12px; }
 .addon-form label { display: block; font-size: 13px; color: #4a5568; margin-bottom: 6px; font-weight: 500; }
 .addon-form textarea {

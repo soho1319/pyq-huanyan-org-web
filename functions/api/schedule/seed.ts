@@ -136,11 +136,12 @@ export async function onRequestPost(ctx: {
         slots = await loadEnabledSlots(ctx.env, user.id, date)
       }
 
-      // 找这天已存在的 (slot)
+      // 找这天已存在的 (slot, status) — D41: overwrite 时跳过 posted
       const existingRows = await ctx.env.DB.prepare(
-        "SELECT slot FROM schedule WHERE user_id = ? AND date = ?"
-      ).bind(user.id, date).all<{ slot: string }>()
+        "SELECT slot, status FROM schedule WHERE user_id = ? AND date = ?"
+      ).bind(user.id, date).all<{ slot: string; status: string }>()
       const existingSet = new Set((existingRows.results || []).map(r => r.slot))
+      const existingStatusMap = new Map((existingRows.results || []).map(r => [r.slot, r.status]))
 
       const toInsert: Array<{ slot: SlotId; post_type: string; template_id: string }> = []
       const toUpdate: Array<{ slot: SlotId; post_type: string; template_id: string }> = []
@@ -150,8 +151,14 @@ export async function onRequestPost(ctx: {
         const slotType = await pickWeightedType(slot, date, isWeekend)
         const slotTpl = TYPE_TO_TEMPLATE[slotType]
         if (existingSet.has(slot)) {
-          if (overwrite) toUpdate.push({ slot, post_type: slotType, template_id: slotTpl })
-          else skipped++
+          if (overwrite) {
+            // D41: 已发的（status=posted）保留 — 不动 post_type / template_id
+            if (existingStatusMap.get(slot) === 'posted') {
+              skipped++
+            } else {
+              toUpdate.push({ slot, post_type: slotType, template_id: slotTpl })
+            }
+          } else skipped++
         } else {
           toInsert.push({ slot, post_type: slotType, template_id: slotTpl })
         }
