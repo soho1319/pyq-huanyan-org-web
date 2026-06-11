@@ -139,9 +139,10 @@ export const WEEKDAY_PHASE_WEIGHTS = {
 
 export function getWeeklyTheme(
   weekStart: string,
-  userLocked: { theme: WeeklyThemeId } | null
+  userLocked: { theme: WeeklyThemeId } | null,
+  cycleStart?: string | null  // D55-15: 用户 cycle 起点（YYYY-MM-DD），默认 2026-06-01
 ): { theme: WeeklyThemeId; weights: Record<string, number>; locked: boolean; cycleIndex: number; label: string } {
-  const startMs = new Date('2026-06-01').getTime()
+  const startMs = new Date(cycleStart || '2026-06-01').getTime()
   const currentMs = new Date(weekStart).getTime()
   const weekDiff = Math.floor((currentMs - startMs) / (7 * 86400 * 1000))
   const cycleIndex = ((weekDiff % 4) + 4) % 4
@@ -155,13 +156,14 @@ export function getWeeklyTheme(
 
 export function getMonthlyPhase(
   yearMonth: string,
-  userCycleIndex: number | null
+  userCycleIndex: number | null,
+  cycleStart?: string | null  // D55-15: 用户 cycle 起点（YYYY-MM-DD）
 ): { phase: 1|2|3; weights: Record<string, number>; locked: boolean; cycleIndex: number; label: string } {
   if (userCycleIndex && userCycleIndex >= 1 && userCycleIndex <= 3) {
     return { phase: userCycleIndex as 1|2|3, weights: MONTHLY_PHASES[userCycleIndex as 1|2|3].weights, locked: true, cycleIndex: userCycleIndex, label: MONTHLY_PHASES[userCycleIndex as 1|2|3].label }
   }
   const [y, m] = yearMonth.split('-').map(Number)
-  const startMs = new Date('2026-06-01').getTime()
+  const startMs = new Date(cycleStart || '2026-06-01').getTime()
   const currentMs = Date.UTC(y, m - 1, 1)
   const monthDiff = Math.round((currentMs - startMs) / (30 * 86400 * 1000))
   const cycleIndex = ((monthDiff % 3) + 3) % 3 + 1

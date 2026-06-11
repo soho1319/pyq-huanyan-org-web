@@ -175,7 +175,7 @@ export async function onRequestGet(ctx: {
 
   // ★ D36: 算本周主题 + 本月阶段
   const { getWeeklyTheme, getMonthlyPhase, WEEKLY_THEMES, DIMENSION_TYPE_MAP, reverseDimensionMap } = await import("./lib/schedule-constants")
-  const weekTheme = getWeeklyTheme(weekStart.toISOString().slice(0, 10), null)
+  const weekTheme = getWeeklyTheme(weekStart.toISOString().slice(0, 10), null, user.cycle_start_date)
 
   // ★ D39: 算本周主题"已发数"——取本周主题 top 1 类的已发数 + 总排数
   const themeTopType = (Object.entries(weekTheme.weights) as [string, number][])
@@ -185,7 +185,7 @@ export async function onRequestGet(ctx: {
   // 本周主题建议覆盖率：按主题 top 1 类的 7 类总和推算（粗略）
   const themeTypeSum = Object.values(weekTheme.weights).reduce((a, b) => a + b, 0)
   const weekTopSuggested = Math.round(weekTopTotal * (weekTheme.weights[themeTopType] / themeTypeSum) * 0.6)  // 60% 系数软目标
-  const monthPhase = getMonthlyPhase(todayStr.slice(0, 7), themeMonthRow?.cycle_index || null)
+  const monthPhase = getMonthlyPhase(todayStr.slice(0, 7), themeMonthRow?.cycle_index || null, user.cycle_start_date)
 
   // ★ D42-E: 算"明天"建议（用同 D36 4 层权重 + 主题月 + weekday weights）
   let daySuggestion: import("./lib/schedule-constants").DaySuggestion | null = null

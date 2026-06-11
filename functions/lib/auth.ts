@@ -16,6 +16,7 @@ export interface User {
   username: string
   display_name: string | null
   is_admin: number
+  cycle_start_date?: string | null   // D55-15: 账号启用日 = 日排/周排/月排起点
 }
 
 const PBKDF2_ITER = 100_000
@@ -175,7 +176,7 @@ export async function getCurrentUser(req: Request, env: Env): Promise<User | nul
   if (!session) return null
   if (!env.DB) return null
   const row = await env.DB.prepare(
-    "SELECT id, username, display_name, is_admin FROM users WHERE id = ?"
+    "SELECT id, username, display_name, is_admin, cycle_start_date FROM users WHERE id = ?"
   ).bind(session.userid).first<User | null>()
   return row
 }

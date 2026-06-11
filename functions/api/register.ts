@@ -110,8 +110,8 @@ export async function onRequestPost(ctx: {
   const now = Date.now()
 
   await env.DB.prepare(
-    "INSERT INTO users (id, username, password_hash, display_name, is_admin, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)"
-  ).bind(userId, username, passwordHash, display_name, now, now).run()
+    "INSERT INTO users (id, username, password_hash, display_name, is_admin, created_at, updated_at, cycle_start_date) VALUES (?, ?, ?, ?, 0, ?, ?, ?)"
+  ).bind(userId, username, passwordHash, display_name, now, now, new Date().toISOString().slice(0, 10)).run()
 
   // 写 invite_redemptions + 更新 used_count
   await env.DB.prepare(
