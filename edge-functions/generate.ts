@@ -83,7 +83,7 @@ async function callOpenAICompatible(
  messages: [
  {
  role: "system",
- content: "你是婉音老师课程体系下的内容营销专家，擅长写朋友圈文案、内容营销、用户故事。",
+ content: "你是"内容营销朋友圈"课程体系下的内容营销专家，擅长写朋友圈文案、内容营销、用户故事。",
  },
  { role: "user", content: prompt },
  ],

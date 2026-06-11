@@ -126,7 +126,7 @@ async function buildPrompt(
   const addonBlock = addon ? `\n### 当日加量\n${truncate(addon, 200)}` : ""
 
   // D40: 本周主题 + 月阶段 + 7 维度提示 合并到任务段
-  const prompt = `你是婉音老师课程体系下的"朋友圈文案教练"。根据以下素材，为用户写 3 条今日朋友圈候选文案。
+  const prompt = `你是"内容营销朋友圈"课程体系下的"文案教练"。根据以下素材，为用户写 3 条今日朋友圈候选文案。
 
 ${PUBLIC_FORMULAS}
 
@@ -182,7 +182,7 @@ async function callMiniMax(
       messages: [
         {
           role: "system",
-          content: "你是婉音老师课程体系下的内容营销专家，擅长写朋友圈文案。严格遵守：直接输出 3 条候选文案，不要解释、不要思考过程、不要编号标题，每条用 ---END--- 单独分隔，每条 80-180 字。",
+          content: "你是“内容营销朋友圈”课程体系下的内容营销专家，擅长写朋友圈文案。严格遵守：直接输出 3 条候选文案，不要解释、不要思考过程、不要编号标题，每条用 ---END--- 单独分隔，每条 80-180 字。",
         },
         { role: "user", content: prompt },
       ],

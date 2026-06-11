@@ -12,7 +12,7 @@
 <div class="prompt-title">Prompt1：写朋友圈自我介绍</div>
 <div class="prompt-content">
 
-你是婉音老师课程体系下的内容营销专家。
+你是"内容营销朋友圈"课程体系下的内容营销专家。
 
 请帮我写一条朋友圈自我介绍：
 
@@ -69,7 +69,7 @@
 <div class="prompt-title">Prompt1：写朋友圈自我介绍</div>
 <div class="prompt-content">
 
-你是婉音老师课程体系下的内容营销专家。
+你是"内容营销朋友圈"课程体系下的内容营销专家。
 
 请帮我写一条朋友圈自我介绍：
 

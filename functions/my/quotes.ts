@@ -63,7 +63,7 @@ ${themeCssVar(theme)}
         </div>
         <div class="field">
           <label>来源（可选）</label>
-          <input name="source" placeholder="婉音老师课程 / 原创 / 书名">
+          <input name="source" placeholder="课程笔记 / 原创 / 书名">
         </div>
       </div>
       <div class="actions">
