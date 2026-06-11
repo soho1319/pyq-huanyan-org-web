@@ -448,6 +448,21 @@ export function isSlot(s: string): s is SlotId {
 export function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
+
+// D55-16: Workers 默认 UTC，但排期日期是用户本地日期（CST = UTC+8）
+// 用 Intl.DateTimeFormat 强制按指定时区格式化（不污染原 Date 对象）
+export function ymdInTZ(d: Date, timeZone: string = "Asia/Shanghai"): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d)
+  const y = parts.find(p => p.type === "year")?.value || "1970"
+  const m = parts.find(p => p.type === "month")?.value || "01"
+  const day = parts.find(p => p.type === "day")?.value || "01"
+  return `${y}-${m}-${day}`
+}
 export function addDays(d: Date, n: number): Date {
   const x = new Date(d)
   x.setDate(x.getDate() + n)

@@ -7,7 +7,7 @@
 
 import { loadUserColors, typeStyle } from "./lib/type-colors"
 import { loadUserTheme, themeCssVar } from "./lib/theme"
-import { SLOTS, SLOT_IDS, DIMS, DIM_IDS, HOOK_HINTS, loadEnabledSlots, SlotId, Dim, computeDaySuggestions, loadWeekdayWeights, loadTopCategoryForDim, pickSubtheme, DIMENSION_TYPE_MAP } from "./lib/schedule-constants"
+import { SLOTS, SLOT_IDS, DIMS, DIM_IDS, HOOK_HINTS, loadEnabledSlots, SlotId, Dim, computeDaySuggestions, loadWeekdayWeights, loadTopCategoryForDim, pickSubtheme, DIMENSION_TYPE_MAP, ymdInTZ } from "./lib/schedule-constants"
 import { getThemeWeights } from "./api/theme-month"
 
 interface User {
@@ -88,7 +88,9 @@ export async function onRequestGet(ctx: {
   const origin = `${fwdProto}://${fwdHost}`
 
   const today = new Date()
-  const todayStr = ymd(today)
+  // D55-16: Workers 默认 UTC，schedule.date 是用户本地日期（CST = UTC+8）
+  // 强制用 Asia/Shanghai 时区算 todayStr，否则 UTC 0-8 点会算到昨天
+  const todayStr = ymdInTZ(today, "Asia/Shanghai")
   const weekday = WEEKDAY[today.getDay()]
 
   // 查今天排期（D29: 多条，按 slot 排序）
@@ -205,10 +207,10 @@ export async function onRequestGet(ctx: {
       todayThemeW ? { theme: todayMonthRow!.theme, weights: todayThemeW } : null,
       weekdayW
     )
-    // 明天
+    // 明天（D55-16: 用 ymdInTZ 保持 CST 时区一致）
     const tomorrow = new Date(today)
     tomorrow.setDate(tomorrow.getDate() + 1)
-    const tomorrowStr = ymd(tomorrow)
+    const tomorrowStr = ymdInTZ(tomorrow, "Asia/Shanghai")
     const tomorrowMonth = await ctx.env.DB.prepare(
       "SELECT theme, custom_label, cycle_index FROM theme_months WHERE user_id = ? AND year_month = ?"
     ).bind(user.id, tomorrowStr.slice(0, 7)).first<{ theme: string; custom_label: string | null; cycle_index: number }>()
