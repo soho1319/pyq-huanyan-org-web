@@ -25,7 +25,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          projectName: pyq-b4s
+          projectName: pyq
           directory: vendor/quartz/public
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
