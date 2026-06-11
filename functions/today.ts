@@ -112,6 +112,11 @@ export async function onRequestGet(ctx: {
     }
   }
 
+  // D55-18: 已隐藏 slot（schedule 里有这 slot，但 enabledSlots 里没 = 用户点了"👁 隐藏"）
+  const hiddenSlots: SlotId[] = (Object.keys(scheduleBySlot) as SlotId[]).filter(
+    (sid) => !enabledSlots.includes(sid)
+  )
+
   // 查用户 enabled slots（per-date JSON 覆盖 + 默认 N 段）
   const enabledSlots: SlotId[] = await loadEnabledSlots(ctx.env, user.id, todayStr)
 
@@ -297,6 +302,7 @@ export async function onRequestGet(ctx: {
       daySuggestionError,
       todaySuggestion,     // D46
       todaySuggestionError,// D46
+      hiddenSlots,         // D55-18
       origin,
       colors,
       theme,
@@ -481,12 +487,13 @@ function renderToday(args: {
   todaySuggestion: import("./lib/schedule-constants").DaySuggestion | null  // D46
   todaySuggestionError: string | null                                       // D46
   addonsBySlot: Record<string, ScheduleRow[]>                               // D46
+  hiddenSlots: SlotId[]                                                     // D55-18 已隐藏
   origin: string
   colors: Record<string, { bg: string; fg: string }>
   theme: { start: string; end: string; solid: string }
   postDim: Dim                                                               // D55-12 修复
 }): string {
-  const { user, todayStr, weekday, scheduleBySlot, addonsBySlot, draftsBySlot, enabledSlots, introsMap, casesList, quotesList, formulasList, monthSchedule, weekData, themeMonth, weekTheme, monthPhase, themeTopType, weekTopPosted, weekTopSuggested, dimCounts, lowDims, dimMax, daySuggestion, daySuggestionError, todaySuggestion, todaySuggestionError, origin, colors, theme, postDim } = args
+  const { user, todayStr, weekday, scheduleBySlot, addonsBySlot, draftsBySlot, enabledSlots, introsMap, casesList, quotesList, formulasList, monthSchedule, weekData, themeMonth, weekTheme, monthPhase, themeTopType, weekTopPosted, weekTopSuggested, dimCounts, lowDims, dimMax, daySuggestion, daySuggestionError, todaySuggestion, todaySuggestionError, hiddenSlots, origin, colors, theme, postDim } = args
   // D55-12 修复：D55-11 删孤儿 comment 时把 oldTypeToDim 定义误归到 renderMonthStrip，
   // 重新在 renderToday 顶部定义（与 onRequestGet line 128 一致）
   const oldTypeToDim: Record<string, Dim> = {
@@ -525,6 +532,7 @@ ${themeCssVar(theme)}
 
   <nav class="subnav">
     <a href="/today" class="active">📅 今日</a>
+    <a href="/tomorrow">📅 明日</a>
     <a href="/my/intros">👋 自我介绍</a>
     <a href="/my/cases">👥 客户案例</a>
     <a href="/my/quotes">💎 金句库</a>
@@ -553,7 +561,12 @@ ${themeCssVar(theme)}
         <button type="button" id="reseedTodayBtn" class="btn-reseed-today">🔄 重新排今天（按当前主题月/周主题）</button>
         <span class="muted" id="reseedTodayStatus"></span>
         <span class="muted reseed-hint">已发的不动 · 仅改 pending / skipped</span>
+        <a href="/tomorrow" class="btn-tomorrow" style="margin-left:8px;padding:3px 10px;background:transparent;color:#553c9a;border:1px solid #cbd5e0;border-radius:12px;font-size:11px;text-decoration:none;">📅 明天 →</a>
       </div>
+      ${hiddenSlots.length > 0 ? `<div class="hidden-slots-bar" style="margin:8px 0 12px;padding:8px 12px;background:#fff8e1;border:1px solid #f6e05e;border-radius:6px;font-size:12px;color:#744210;">
+        👁 已隐藏 <strong>${hiddenSlots.length}</strong> 段（${hiddenSlots.map(s => { const m = SLOTS.find(x => x.id === s); return m ? m.label : s }).join(' / ')}），<a href="/calendar" style="color:#553c9a;">📅 去日历恢复</a>或：
+        <button type="button" id="restoreAllHiddenBtn" class="btn-restore-hidden" style="margin-left:4px;padding:2px 8px;background:#553c9a;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;">↩ 全部恢复</button>
+      </div>` : ''}
       ${enabledSlots.map(sid => {
         const meta = SLOTS.find(s => s.id === sid)!
         const r = scheduleBySlot[sid] || scheduleBySlot["morning"] // 兼容旧 slot='main' 兜底（migration 已统一为 'morning'）
@@ -575,7 +588,7 @@ ${themeCssVar(theme)}
           <div class="card-head">
             <h3>⏰ ${meta.label} ${meta.time}</h3>
             <span class="status status-${r?.status || 'pending'}">${statusText}</span>
-            ${(sid === 'morning' || sid === 'noon' || sid === 'evening') ? `<button type="button" class="btn-skip-slot" data-skip-slot="${sid}" data-skip-date="${todayStr}" title="今日不发这${meta.label}（到 📅 日历 可恢复）">⏸ 今日不发</button>` : ''}
+            ${(sid === 'morning' || sid === 'noon' || sid === 'evening') ? `<button type="button" class="btn-skip-slot" data-skip-slot="${sid}" data-skip-date="${todayStr}" title="从今日列表隐藏（不发、不删；可去 📅 日历恢复）">👁 隐藏</button>` : ''}
           </div>
           <div class="type-badge" style="${schedTypeCss}">${schedDim} ${escapeHtml(schedDimName)}${(() => { const s = pickSubtheme(schedDim, todayStr); return s ? `<span class="type-subtheme">📍 ${s.label}</span>` : '' })()}</div>
           <p class="type-tip">${escapeHtml((HOOK_HINTS[schedDim] || '').split('\n').find(l => l.trim()) || '')}</p>
@@ -970,13 +983,13 @@ ${themeCssVar(theme)}
       }
     }
 
-    // D53: "⏸ 今日不发" 按钮 — 早/午/晚 段
+    // D55-18: "👁 隐藏" 按钮 — 早/午/晚 段
     document.querySelectorAll('.btn-skip-slot').forEach(btn => {
       btn.onclick = async () => {
         const slot = btn.getAttribute('data-skip-slot')
         const date = btn.getAttribute('data-skip-date')
         if (!slot || !date) return
-        if (!confirm(\`今天 \${slot} 段不发？\\n（会从今日要发列表移除，schedule 标为 skipped；到 📅 日历可恢复）\\n\\n点确定后页面会刷新。\`)) return
+        if (!confirm(\`把 \${slot} 段从今日列表隐藏？\\n（不发、不删 schedule，可去 📅 日历或下面"显示已隐藏"恢复）\\n\\n点确定后页面会刷新。\`)) return
         btn.disabled = true
         btn.textContent = '⏳ 处理中...'
         try {
@@ -997,6 +1010,32 @@ ${themeCssVar(theme)}
           btn.textContent = '✗ ' + (err?.message || '网络错')
           btn.disabled = false
         }
+      }
+    })
+
+    // D55-18: "↩ 全部恢复" 按钮 — 把今天所有隐藏 slot 一次性恢复
+    const restoreAllBtn = document.getElementById('restoreAllHiddenBtn')
+    if (restoreAllBtn) {
+      restoreAllBtn.onclick = async () => {
+        const hiddenSlotNames = ${JSON.stringify(hiddenSlots)}
+        if (!hiddenSlotNames || hiddenSlotNames.length === 0) return
+        if (!confirm(\`恢复 \${hiddenSlotNames.length} 段到今日列表？\\n（schedule 状态从 skipped 改回 pending）\`)) return
+        restoreAllBtn.disabled = true
+        restoreAllBtn.textContent = '⏳ 恢复中...'
+        let ok = 0
+        for (const slot of hiddenSlotNames) {
+          try {
+            const r = await fetch('/api/today/skip-slot', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ date: ${JSON.stringify(todayStr)}, slot, restore: true }),
+            })
+            const data = await r.json()
+            if (data.ok) ok++
+          } catch {}
+        }
+        alert(\`✓ 恢复了 \${ok}/\${hiddenSlotNames.length} 段\`)
+        location.reload()
       }
     })
 
