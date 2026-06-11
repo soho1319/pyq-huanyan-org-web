@@ -545,7 +545,7 @@ ${themeCssVar(theme)}
     <section class="slot-cards-area">
       <div class="card-head-area">
         <h2>📌 今日要发（${enabledSlots.length} 段固定 + <span id="addonTotalCount">0</span> 加量 = 共发 <span id="totalPostCount">${enabledSlots.length}</span> 条）</h2>
-        <span class="muted">4 段固定：早 8 / 午 12:30 / 晚 20 / 夜 22:30。要几条去 <a href="/my/types">🎨 颜色</a> 配</span>
+        <span class="muted">${SLOTS.filter(s => enabledSlots.includes(s.id)).map(s => s.time).join(' / ')}（${enabledSlots.length} 段）。要几条去 <a href="/my/types">🎨 颜色</a> 配</span>
       </div>
       <div class="reseed-today-bar">
         <button type="button" id="reseedTodayBtn" class="btn-reseed-today">🔄 重新排今天（按当前主题月/周主题）</button>
