@@ -336,6 +336,8 @@ export interface SlotSuggestion {
   weight2: number       // top2 权重
   hookHint: string      // 钩子口诀
   topDims: string[]     // 这个 type 关联的 7 维度
+  // D46: 完整排序（top1, top2, top3, ...）给"🔄 换"按钮循环用
+  topN: Array<{ type: string; weight: number }>
 }
 
 export interface DaySuggestion {
@@ -390,6 +392,8 @@ export function computeDaySuggestions(
     const topDims = reverseDimensionMap(t1)
     // D45: HOOK_HINTS 现在是多行（5 个钩子），卡片只显示首行（最常用的那个）
     const firstHook = (HOOK_HINTS[t1] || '').split('\n').find(l => l.trim()) || ''
+    // D46: 完整 topN 列表给"🔄 换"按钮循环
+    const topN = sorted.map(([type, w]) => ({ type, weight: Math.round(w * 100) }))
     slots[slot] = {
       type: t1,
       type2: t2,
@@ -397,6 +401,7 @@ export function computeDaySuggestions(
       weight2: Math.round(w2 * 100),
       hookHint: firstHook,
       topDims,
+      topN,
     }
   }
 

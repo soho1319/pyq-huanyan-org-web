@@ -1,12 +1,13 @@
 // ============================================
 // /today
 // 多用户今日页：D29 一天 4 段（早 8 / 午 12:30 / 晚 20 / 夜 22:30）
-// 4 张 slot-card 渲染：每张独立 AI + 加餐 + 标记已发
+// 4 张 slot-card 渲染：每张独立 AI + 加量 + 标记已发
+// D46: 每段下挂 1 个"可选加量" sub-card（top2 type），3 按钮：✅/🔄/✕
 // ============================================
 
 import { loadUserColors, typeStyle } from "./lib/type-colors"
 import { loadUserTheme, themeCssVar } from "./lib/theme"
-import { SLOTS, SLOT_IDS, TYPE_TIPS, loadEnabledSlots, SlotId, DIMENSION_TYPE_MAP, computeDaySuggestions, loadWeekdayWeights } from "./lib/schedule-constants"
+import { SLOTS, SLOT_IDS, TYPE_TIPS, HOOK_HINTS, loadEnabledSlots, SlotId, DIMENSION_TYPE_MAP, computeDaySuggestions, loadWeekdayWeights } from "./lib/schedule-constants"
 import { getThemeWeights } from "./api/theme-month"
 
 interface User {
@@ -25,6 +26,7 @@ interface ScheduleRow {
   template_id: string | null
   status: string
   note: string | null
+  sort_order?: number
 }
 
 interface AiDraftRow {
@@ -90,9 +92,22 @@ export async function onRequestGet(ctx: {
 
   // 查今天排期（D29: 多条，按 slot 排序）
   const scheduleRows = await ctx.env.DB.prepare(
-    "SELECT * FROM schedule WHERE user_id = ? AND date = ? ORDER BY slot ASC"
+    "SELECT * FROM schedule WHERE user_id = ? AND date = ? ORDER BY slot ASC, sort_order ASC"
   ).bind(user.id, todayStr).all<ScheduleRow>()
   const scheduleList = scheduleRows.results || []
+
+  // D46: 按 slot 分组，区分固定 (sort_order=0) 和加量 (sort_order>=1)
+  const scheduleBySlot: Record<string, ScheduleRow> = {}     // 固定：每段 1 条
+  const addonsBySlot: Record<string, ScheduleRow[]> = {}     // 加量：每段 0-N 条
+  for (const r of scheduleList) {
+    const so = r.sort_order || 0
+    if (so === 0) {
+      scheduleBySlot[r.slot] = r
+    } else {
+      if (!addonsBySlot[r.slot]) addonsBySlot[r.slot] = []
+      addonsBySlot[r.slot].push(r)
+    }
+  }
 
   // 查用户 enabled slots（per-date JSON 覆盖 + 默认 N 段）
   const enabledSlots: SlotId[] = await loadEnabledSlots(ctx.env, user.id, todayStr)
@@ -104,10 +119,9 @@ export async function onRequestGet(ctx: {
   const draftsBySlot: Record<string, AiDraftRow> = {}
   for (const d of todayDraftsRows.results || []) if (d.slot) draftsBySlot[d.slot] = d
 
-  // scheduleBySlot + 主排（向后兼容旧变量）
-  const scheduleBySlot: Record<string, ScheduleRow> = {}
-  for (const r of scheduleList) scheduleBySlot[r.slot] = r
-  const schedule: ScheduleRow | null = scheduleList.length > 0 ? scheduleList[0] : null
+  // scheduleBySlot + 加量分组（D46 已在上面按 sort_order 区分）
+  // 兼容旧变量：schedule = 第一条（按 sort_order ASC 的固定行）
+  const schedule: ScheduleRow | null = scheduleBySlot[enabledSlots[0] || "morning"] || null
   const postType = schedule?.post_type || "休息"
 
   // 查我的素材
@@ -168,8 +182,22 @@ export async function onRequestGet(ctx: {
   // ★ D42-E: 算"明天"建议（用同 D36 4 层权重 + 主题月 + weekday weights）
   let daySuggestion: import("./lib/schedule-constants").DaySuggestion | null = null
   let daySuggestionError: string | null = null
+  // D46: 算"今天"建议（用于每段 top2 候选加量 sub-card）
+  let todaySuggestion: import("./lib/schedule-constants").DaySuggestion | null = null
+  let todaySuggestionError: string | null = null
   try {
     const weekdayW = await loadWeekdayWeights(ctx.env, user.id)
+    // 今日
+    const todayMonthRow = await ctx.env.DB.prepare(
+      "SELECT theme, custom_label, cycle_index FROM theme_months WHERE user_id = ? AND year_month = ?"
+    ).bind(user.id, todayStr.slice(0, 7)).first<{ theme: string; custom_label: string | null; cycle_index: number }>()
+    const todayThemeW = todayMonthRow ? getThemeWeights(todayMonthRow.theme, null) : null
+    todaySuggestion = computeDaySuggestions(
+      todayStr,
+      todayThemeW ? { theme: todayMonthRow!.theme, weights: todayThemeW } : null,
+      weekdayW
+    )
+    // 明天
     const tomorrow = new Date(today)
     tomorrow.setDate(tomorrow.getDate() + 1)
     const tomorrowStr = ymd(tomorrow)
@@ -184,7 +212,8 @@ export async function onRequestGet(ctx: {
     )
   } catch (err) {
     daySuggestionError = err instanceof Error ? err.message : String(err)
-    console.error('[D42-E] computeDaySuggestions failed:', err)
+    todaySuggestionError = err instanceof Error ? err.message : String(err)
+    console.error('[D42-E/D46] computeDaySuggestions failed:', err)
   }
 
   // ★ D40: 算本周 7 维度覆盖（用 post_type 反查人设维度）
@@ -210,6 +239,7 @@ export async function onRequestGet(ctx: {
     todayStr,
     weekday,
     scheduleBySlot,
+    addonsBySlot,        // D46
     draftsBySlot,
     enabledSlots,
     introsMap,
@@ -229,6 +259,8 @@ export async function onRequestGet(ctx: {
     dimMax,
     daySuggestion: daySuggestion!,
     daySuggestionError,
+    todaySuggestion,     // D46
+    todaySuggestionError,// D46
     origin,
     colors,
     theme,
@@ -387,11 +419,14 @@ function renderToday(args: {
   dimMax: number
   daySuggestion: import("./lib/schedule-constants").DaySuggestion | null
   daySuggestionError: string | null
+  todaySuggestion: import("./lib/schedule-constants").DaySuggestion | null  // D46
+  todaySuggestionError: string | null                                       // D46
+  addonsBySlot: Record<string, ScheduleRow[]>                               // D46
   origin: string
   colors: Record<string, { bg: string; fg: string }>
   theme: { start: string; end: string; solid: string }
 }): string {
-  const { user, todayStr, weekday, scheduleBySlot, draftsBySlot, enabledSlots, introsMap, casesList, quotesList, formulasList, monthSchedule, weekData, themeMonth, weekTheme, monthPhase, themeTopType, weekTopPosted, weekTopSuggested, dimCounts, lowDims, dimMax, daySuggestion, daySuggestionError, origin, colors, theme } = args
+  const { user, todayStr, weekday, scheduleBySlot, addonsBySlot, draftsBySlot, enabledSlots, introsMap, casesList, quotesList, formulasList, monthSchedule, weekData, themeMonth, weekTheme, monthPhase, themeTopType, weekTopPosted, weekTopSuggested, dimCounts, lowDims, dimMax, daySuggestion, daySuggestionError, todaySuggestion, todaySuggestionError, origin, colors, theme } = args
   // 向后兼容：保留 postType / templateId / templateName / typeTip（AI 帮写区还引用）
   const firstSlot = enabledSlots[0] || "morning"
   const firstSched = scheduleBySlot[firstSlot] || scheduleBySlot["morning"] || null
@@ -445,7 +480,7 @@ ${themeCssVar(theme)}
 
     <section class="slot-cards-area">
       <div class="card-head-area">
-        <h2>📌 今日要发（${enabledSlots.length} 段）</h2>
+        <h2>📌 今日要发（${enabledSlots.length} 段固定 + <span id="addonTotalCount">0</span> 加量 = 共发 <span id="totalPostCount">${enabledSlots.length}</span> 条）</h2>
         <span class="muted">4 段固定：早 8 / 午 12:30 / 晚 20 / 夜 22:30。要几条去 <a href="/my/types">🎨 颜色</a> 配</span>
       </div>
       <div class="reseed-today-bar">
@@ -460,6 +495,13 @@ ${themeCssVar(theme)}
         const schedType = r?.post_type || "休息"
         const schedTypeCss = typeStyle(colors, schedType)
         const statusText = r ? (r.status === 'posted' ? '✓ 已发' : r.status === 'skipped' ? '— 跳' : '○ 待发') : '○ 待发'
+        // D46: 已有加量（DB 里 sort_order>=1 的行）
+        const slotAddons = addonsBySlot[sid] || []
+        // D46: 候选 = todaySuggestion 的 top2（如果已有加量就不显示候选卡）
+        const slotSug = todaySuggestion?.slots?.[sid]
+        const hasCandidate = !!r && slotAddons.length === 0 && slotSug && slotSug.type2 && slotSug.type2 !== schedType
+        const candidateFirstHook = slotSug ? (HOOK_HINTS[slotSug.type2] || '').split('\n').find(l => l.trim()) || '' : ''
+        const topNJson = slotSug ? JSON.stringify(slotSug.topN.map(x => ({ type: x.type, weight: x.weight }))) : '[]'
         return `
         <section class="card slot-card slot-${sid}">
           <div class="card-head">
@@ -468,13 +510,34 @@ ${themeCssVar(theme)}
           </div>
           <div class="type-badge" style="${schedTypeCss}">${schedType}</div>
           <p class="type-tip">${escapeHtml(TYPE_TIPS[schedType] || '')}</p>
-          ${r?.note ? `<div class="note-box">📝 加餐：${escapeHtml(r.note)}</div>` : ''}
+          ${r?.note ? `<div class="note-box">📝 加量：${escapeHtml(r.note)}</div>` : ''}
+          ${slotAddons.length > 0 ? `<div class="addon-list">
+            ${slotAddons.map((a, idx) => `
+              <div class="addon-row">
+                <span class="addon-badge" style="${typeStyle(colors, a.post_type)}">➕ 加量 ${idx + 1} · ${a.post_type}</span>
+                ${a.status === 'posted' ? '<span class="status status-posted">✓ 已发</span>' : a.status === 'skipped' ? '<span class="status status-skipped">— 跳</span>' : '<span class="status status-pending">○ 待发</span>'}
+              </div>
+            `).join('')}
+          </div>` : ''}
+          ${hasCandidate ? `<div class="candidate-card" data-slot="${sid}" data-fixed="${escapeHtml(schedType)}" data-topn='${escapeHtml(topNJson)}' data-idx="1">
+            <div class="candidate-head">➕ 可选加量（D46 top2）</div>
+            <div class="candidate-body">
+              <span class="candidate-type-badge" data-cand-type style="${typeStyle(colors, slotSug.type2)}">${slotSug.type2}</span>
+              <span class="candidate-weight" data-cand-weight>${slotSug.weight2}%</span>
+              <span class="candidate-hook muted" data-cand-hook>${escapeHtml(candidateFirstHook)}</span>
+            </div>
+            <div class="candidate-actions">
+              <button type="button" class="btn-cand-accept" data-slot="${sid}">✅ 用这条</button>
+              <button type="button" class="btn-cand-swap" data-slot="${sid}">🔄 换</button>
+              <button type="button" class="btn-cand-skip" data-slot="${sid}">✕ 跳</button>
+            </div>
+          </div>` : ''}
           <form class="addon-form" method="POST" action="${escapeHtml(origin)}/api/today/addon">
             <input type="hidden" name="slot" value="${sid}">
             <textarea name="note" rows="2" placeholder="本时段想说点啥（可选）">${escapeHtml(r?.note || '')}</textarea>
             <div class="form-actions">
-              <button type="submit" name="action" value="note" class="btn-primary">💾 保存加餐</button>
-              ${r ? `<button type="submit" name="action" value="posted" class="btn-success">✓ 标记已发</button><button type="submit" name="action" value="skipped" class="btn-muted">— 跳</button>` : `<button type="submit" name="action" value="note" class="btn-secondary">+ 加 1 条加餐</button>`}
+              <button type="submit" name="action" value="note" class="btn-primary">💾 保存加量</button>
+              ${r ? `<button type="submit" name="action" value="posted" class="btn-success">✓ 标记已发</button><button type="submit" name="action" value="skipped" class="btn-muted">— 跳</button>` : `<button type="submit" name="action" value="note" class="btn-secondary">+ 加 1 条加量</button>`}
             </div>
           </form>
           <div class="ai-zone" data-slot="${sid}">
@@ -813,6 +876,88 @@ ${themeCssVar(theme)}
           })
       }
     }
+
+    // D46: 候选加量按钮（✅ / 🔄 / ✕）— 每段 1 个候选 sub-card
+    const HOOK_FIRST_LINE = ${JSON.stringify(
+      Object.fromEntries(
+        Object.entries(HOOK_HINTS).map(([k, v]) => [k, (v || '').split('\n').find(l => l.trim()) || ''])
+      )
+    )}
+    const TYPE_COLORS = ${JSON.stringify(colors)}
+    function typeBadgeStyle(t) {
+      const c = TYPE_COLORS[t] || { bg: '#e2e8f0', fg: '#1a202c' }
+      return 'background:' + c.bg + ';color:' + c.fg + ';'
+    }
+    function recalcTotal() {
+      const addons = document.querySelectorAll('.addon-row').length
+      const total = ${enabledSlots.length} + addons
+      const a = document.getElementById('addonTotalCount')
+      const t = document.getElementById('totalPostCount')
+      if (a) a.textContent = String(addons)
+      if (t) t.textContent = String(total)
+    }
+    document.querySelectorAll('.candidate-card').forEach(card => {
+      const slot = card.getAttribute('data-slot')
+      const fixed = card.getAttribute('data-fixed')
+      let topN = []
+      try { topN = JSON.parse(card.getAttribute('data-topn') || '[]') } catch(e) {}
+      const pool = topN.filter(x => x.type !== fixed)
+      let curIdx = 0
+      const badge = card.querySelector('[data-cand-type]')
+      const weightEl = card.querySelector('[data-cand-weight]')
+      const hookEl = card.querySelector('[data-cand-hook]')
+      const swapBtn = card.querySelector('.btn-cand-swap')
+      const acceptBtn = card.querySelector('.btn-cand-accept')
+      const skipBtn = card.querySelector('.btn-cand-skip')
+      function render() {
+        if (pool.length === 0) { card.style.display = 'none'; return }
+        const cur = pool[curIdx]
+        if (badge) { badge.textContent = cur.type; badge.setAttribute('style', typeBadgeStyle(cur.type)) }
+        if (weightEl) weightEl.textContent = cur.weight + '%'
+        if (hookEl) hookEl.textContent = HOOK_FIRST_LINE[cur.type] || ''
+      }
+      if (swapBtn) swapBtn.onclick = () => { curIdx = (curIdx + 1) % pool.length; render() }
+      if (acceptBtn) acceptBtn.onclick = () => {
+        const cur = pool[curIdx]
+        if (!cur) return
+        acceptBtn.disabled = true
+        acceptBtn.textContent = '⏳ 落库...'
+        fetch('/api/today/addon', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'accept_candidate', slot: slot, candidate_type: cur.type }),
+        })
+          .then(r => r.json())
+          .then(data => {
+            if (data.ok) {
+              const parent = card.parentElement
+              let list = parent.querySelector('.addon-list')
+              if (!list) {
+                list = document.createElement('div')
+                list.className = 'addon-list'
+                parent.insertBefore(list, card)
+              }
+              const row = document.createElement('div')
+              row.className = 'addon-row'
+              row.innerHTML = '<span class="addon-badge" style="' + typeBadgeStyle(cur.type) + '">➕ 加量 1 · ' + cur.type + '</span><span class="status status-pending">○ 待发</span>'
+              list.appendChild(row)
+              card.style.display = 'none'
+              recalcTotal()
+            } else {
+              acceptBtn.disabled = false
+              acceptBtn.textContent = '✅ 用这条'
+              alert('落库失败：' + (data.error || '未知错误'))
+            }
+          })
+          .catch(err => {
+            acceptBtn.disabled = false
+            acceptBtn.textContent = '✅ 用这条'
+            alert('出错：' + err.message)
+          })
+      }
+      if (skipBtn) skipBtn.onclick = () => { card.style.display = 'none' }
+    })
+    recalcTotal()
   </script>
 </body>
 </html>`
@@ -904,6 +1049,23 @@ main { max-width: 760px; margin: 0 auto; padding: 20px; }
   background: #fefcbf; border-left: 3px solid #ecc94b;
   padding: 8px 12px; border-radius: 4px; margin: 12px 0;
   color: #744210; font-size: 14px;
+}
+.addon-list { margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+.addon-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f0fff4; border-left: 3px solid #48bb78; border-radius: 4px; }
+.addon-badge { padding: 3px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+.candidate-card { margin: 10px 0 12px; padding: 10px 12px; background: #f7fafc; border: 1px dashed #cbd5e0; border-radius: 6px; }
+.candidate-head { font-size: 12px; color: #718096; margin-bottom: 6px; font-weight: 600; }
+.candidate-body { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.candidate-type-badge { padding: 3px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+.candidate-weight { font-size: 12px; color: #4a5568; font-weight: 600; }
+.candidate-hook { font-size: 12px; flex: 1; min-width: 200px; }
+.candidate-actions { display: flex; gap: 6px; }
+.btn-cand-accept, .btn-cand-skip, .btn-cand-swap { padding: 5px 12px; font-size: 13px; border: 0; border-radius: 4px; cursor: pointer; }
+.btn-cand-accept { background: #48bb78; color: white; }
+.btn-cand-skip { background: #e2e8f0; color: #4a5568; }
+.btn-cand-swap { background: #edf2f7; color: #2d3748; }
+.btn-cand-accept:hover { background: #38a169; }
+.btn-cand-skip:hover { background: #cbd5e0; }
 }
 .month-strip-card .month-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; }
 .month-strip-card .ms { padding: 2px 8px; border-radius: 4px; background: #f7fafc; }

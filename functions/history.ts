@@ -129,7 +129,7 @@ function renderDay(d: AiDraft): string {
       <span class="type-badge">${escapeHtml(d.today_type)}</span>
       ${used ? `<span class="used-badge">✓ 已用第 ${used} 条</span>` : '<span class="unused-badge">○ 未用</span>'}
     </div>
-    ${d.addon ? `<div class="addon-line">📝 加餐：${escapeHtml(d.addon)}</div>` : ''}
+    ${d.addon ? `<div class="addon-line">📝 加量：${escapeHtml(d.addon)}</div>` : ''}
     ${d.model ? `<div class="model-line">🤖 ${escapeHtml(d.model)}${usedAt ? ' · ' + usedAt : ''}</div>` : ''}
     <ul class="draft-list">
       ${drafts.map((text, i) => {

@@ -7,7 +7,7 @@
 //
 // 实现：
 // 1. 查当前用户的 intros / cases / quotes / formula_templates（D1）
-// 2. 拼 prompt（含公共公式简版 + 素材 + 今日类型 + 加餐）
+// 2. 拼 prompt（含公共公式简版 + 素材 + 今日类型 + 加量）
 // 3. 调 MiniMax API（OpenAI 兼容协议）
 // 4. 解析 3 条候选文案（用 --- 分隔）
 // ============================================
@@ -123,7 +123,7 @@ async function buildPrompt(
         `- [${f.formula_id} v${f.variant_index}] ${truncate(f.filled_text, 100)}`).join("\n")
     : "\n### 我写过的公式填空\n（暂无）"
 
-  const addonBlock = addon ? `\n### 当日加餐\n${truncate(addon, 200)}` : ""
+  const addonBlock = addon ? `\n### 当日加量\n${truncate(addon, 200)}` : ""
 
   // D40: 本周主题 + 月阶段 + 7 维度提示 合并到任务段
   const prompt = `你是婉音老师课程体系下的"朋友圈文案教练"。根据以下素材，为用户写 3 条今日朋友圈候选文案。
@@ -144,7 +144,7 @@ ${introsBlock}${casesBlock}${quotesBlock}${formulasBlock}${addonBlock}
 - 7维度本周已发：${dimSummary} → 建议多发：${lowDims}
 - 写 3 条候选（80-200字，\`---END---\` 分隔），第一人称、口语化、有"我"有"你"、不强推销
 - 优先用"客户案例"和"金句库"具体内容；缺素材可临场编，但语气要像用户本人
-- 如有加餐（addon），按加餐优先；类型与本周主题贴合时优先采用
+- 如有加量（addon），按加量优先；类型与本周主题贴合时优先采用
 - 不要编号、不要"以下是"、"选项1"、"第一条"等提示语
 
 ====================================

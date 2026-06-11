@@ -1,16 +1,17 @@
 // ============================================
 // POST /api/today/addon
-// 今日加餐 / 标记已发 / 标记跳过 / 记录 AI 草稿已用
+// 今日加量 / 标记已发 / 标记跳过 / 接受候选加量 / 记录 AI 草稿已用
 // 接受 form-urlencoded 或 JSON
-// body: { action: 'note'|'posted'|'skipped', note?: string, draft_id?: string, chosen_index?: 1|2|3, slot?: 'morning'|'noon'|'evening'|'night' }
+// body: { action: 'note'|'posted'|'skipped'|'accept_candidate', note?: string, draft_id?: string, chosen_index?: 1|2|3, slot?: 'morning'|'noon'|'evening'|'night', candidate_type?: string }
 //   - action=note     → 更新 note（不改变 status）
 //   - action=posted   → status=posted（如带 draft_id + chosen_index → 同步标记 ai_drafts 已用）
 //   - action=skipped  → status=skipped
+//   - action=accept_candidate → 在该 slot 额外插一条排期（status=pending, sort_order=1, note='加量: type'）
 // slot 默认 'morning'，D29 之前数据兜底为 morning
 // ============================================
 
 import { getUser, json, jsonError, readJson, CrudError, newId } from "../crud-helper"
-import { isSlot } from "../../lib/schedule-constants"
+import { isSlot, isPostType, TYPE_TO_TEMPLATE } from "../../lib/schedule-constants"
 
 interface User { id: string }
 
@@ -29,7 +30,7 @@ export async function onRequestPost(ctx: {
 
     // 解析 body（form 或 JSON）
     const ct = (ctx.request.headers.get("Content-Type") || "").toLowerCase()
-    let body: { action?: string; note?: string; draft_id?: string; chosen_index?: number; slot?: string } = {}
+    let body: { action?: string; note?: string; draft_id?: string; chosen_index?: number; slot?: string; candidate_type?: string } = {}
     if (ct.includes("application/json")) {
       body = await readJson(ctx.request)
     } else {
@@ -40,6 +41,7 @@ export async function onRequestPost(ctx: {
         draft_id: form.get("draft_id") ? String(form.get("draft_id")) : undefined,
         chosen_index: form.get("chosen_index") ? parseInt(String(form.get("chosen_index"))) : undefined,
         slot: form.get("slot") ? String(form.get("slot")) : undefined,
+        candidate_type: form.get("candidate_type") ? String(form.get("candidate_type")) : undefined,
       }
     }
 
@@ -109,14 +111,25 @@ export async function onRequestPost(ctx: {
           "UPDATE schedule SET note = ?, updated_at = ? WHERE user_id = ? AND date = ? AND slot = ?"
         ).bind(body.note || null, now, user.id, today, slot).run()
       } else {
-        // 没排期 → 创建一条带 note 的"加餐"记录
+        // 没排期 → 创建一条带 note 的"加量"记录
         await ctx.env.DB.prepare(
           `INSERT INTO schedule (id, user_id, date, slot, post_type, template_id, status, note, sort_order, updated_at)
            VALUES (?, ?, ?, ?, '休息', 'lifestyle', 'pending', ?, 0, ?)`
         ).bind(newId(), user.id, today, slot, body.note || null, now).run()
       }
+    } else if (action === "accept_candidate") {
+      // D46: 接受候选加量 → 在该 slot 额外插一条 schedule（sort_order=1 区分固定）
+      const candType = body.candidate_type || ""
+      if (!isPostType(candType)) {
+        throw new CrudError(`candidate_type 必须是 7 种 post_type 之一，当前：${candType}`, 400)
+      }
+      const tplId = TYPE_TO_TEMPLATE[candType as keyof typeof TYPE_TO_TEMPLATE] || 'lifestyle'
+      await ctx.env.DB.prepare(
+        `INSERT INTO schedule (id, user_id, date, slot, post_type, template_id, status, note, sort_order, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 1, ?)`
+      ).bind(newId(), user.id, today, slot, candType, tplId, `加量: ${candType}`, now).run()
     } else {
-      throw new CrudError(`action 必须是 note/posted/skipped，当前：${action}`, 400)
+      throw new CrudError(`action 必须是 note/posted/skipped/accept_candidate，当前：${action}`, 400)
     }
 
     // 表单提交 → 重定向回 /today
