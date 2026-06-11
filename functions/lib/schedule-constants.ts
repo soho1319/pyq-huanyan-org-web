@@ -112,7 +112,7 @@ export function isSlot(s: string): s is SlotId {
   return (SLOT_IDS as readonly string[]).includes(s)
 }
 
-// 决定某天该开几段：per-date JSON 覆盖 → 默认 N 段
+// 决定某天该开几段：D50 _default 数组 > per-date JSON 覆盖 > 默认 N 段
 export function resolveEnabledSlots(
   settings: { default_slots_per_day: number; slot_config_json: string | null } | null,
   date: string
@@ -120,9 +120,20 @@ export function resolveEnabledSlots(
   if (settings?.slot_config_json) {
     try {
       const m = JSON.parse(settings.slot_config_json)
+      // 1. D50: 全局 _default 数组（用户勾了哪几段就是哪几段，顺序由勾选决定）
+      if (Array.isArray(m._default)) {
+        // per-date 覆盖优先于 _default
+        if (Array.isArray(m[date])) return m[date] as SlotId[]
+        const valid = (m._default as unknown[]).filter(
+          (s): s is SlotId => typeof s === "string" && (SLOT_IDS as readonly string[]).includes(s)
+        )
+        if (valid.length > 0) return valid
+      }
+      // 2. 老格式：只有 per-date 覆盖
       if (Array.isArray(m[date])) return m[date] as SlotId[]
     } catch {}
   }
+  // 3. 兜底：默认 N 段（D29 行为，向后兼容）
   const n = Math.max(1, Math.min(4, settings?.default_slots_per_day || 1))
   return SLOTS.slice(0, n).map(s => s.id)
 }

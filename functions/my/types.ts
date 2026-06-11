@@ -341,12 +341,13 @@ export async function onRequestGet(ctx: {
   if (saved === "reset") msg = "✓ 已恢复默认"
 
   const row = await ctx.env.DB.prepare(
-    "SELECT type_colors, theme_start, theme_end, default_slots_per_day, weekday_weights_json FROM user_settings WHERE user_id = ?"
-  ).bind(user.id).first<{ type_colors: string; theme_start: string; theme_end: string; default_slots_per_day: number | null; weekday_weights_json: string | null }>()
+    "SELECT type_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json FROM user_settings WHERE user_id = ?"
+  ).bind(user.id).first<{ type_colors: string; theme_start: string; theme_end: string; default_slots_per_day: number | null; slot_config_json: string | null; weekday_weights_json: string | null }>()
 
   let currentColors: Record<string, string> = {}
   let currentTheme = { start: DEFAULT_THEME.start, end: DEFAULT_THEME.end }
   let defaultSlotsPerDay = 1
+  let enabledSlotsFromJson: SlotId[] | null = null
   // D37: 加载 weekday weights（用户自定 → D36 默认）
   const { WEEKDAY_PHASE_WEIGHTS } = await import("../lib/schedule-constants")
   let weekdayWeights = {
@@ -361,6 +362,17 @@ export async function onRequestGet(ctx: {
       end: row.theme_end || DEFAULT_THEME.end,
     }
     defaultSlotsPerDay = row.default_slots_per_day || 1
+    // D50: 从 slot_config_json._default 读用户实际勾选的段
+    if (row.slot_config_json) {
+      try {
+        const cfg = JSON.parse(row.slot_config_json)
+        if (Array.isArray(cfg._default)) {
+          enabledSlotsFromJson = cfg._default.filter(
+            (s: unknown): s is SlotId => typeof s === "string" && (SLOT_IDS as readonly string[]).includes(s)
+          )
+        }
+      } catch {}
+    }
     if (row.weekday_weights_json) {
       try {
         const parsed = JSON.parse(row.weekday_weights_json)
@@ -372,8 +384,8 @@ export async function onRequestGet(ctx: {
       } catch {}
     }
   }
-  // D29: 推算 enabled slots（按 SLOTS 顺序取前 N 段）
-  const enabledSlots = SLOTS.slice(0, Math.max(1, Math.min(4, defaultSlotsPerDay))).map(s => s.id)
+  // D50: 优先用 _default 数组（用户实际勾了哪几段），否则按 N 段推
+  const enabledSlots = enabledSlotsFromJson ?? SLOTS.slice(0, Math.max(1, Math.min(4, defaultSlotsPerDay))).map(s => s.id)
   return renderPage(currentColors, currentTheme, user, msg, enabledSlots, weekdayWeights)
 }
 
@@ -396,20 +408,26 @@ export async function onRequestPost(ctx: {
 
   // 先读当前/默认颜色（用来兜底）
   const existingRow = await ctx.env.DB.prepare(
-    "SELECT type_colors, theme_start, theme_end FROM user_settings WHERE user_id = ?"
-  ).bind(user.id).first<{ type_colors: string; theme_start: string; theme_end: string }>()
+    "SELECT type_colors, theme_start, theme_end, slot_config_json FROM user_settings WHERE user_id = ?"
+  ).bind(user.id).first<{ type_colors: string; theme_start: string; theme_end: string; slot_config_json: string | null }>()
   let fallbackColors: Record<string, { bg: string; fg: string }> = { ...DEFAULT_COLORS }
   let fallbackTheme = { start: DEFAULT_THEME.start, end: DEFAULT_THEME.end }
+  // D50: 保留 per-date 覆盖（slot_config_json 里除 _default 外的 key）
+  let existingConfig: Record<string, unknown> = {}
   if (existingRow) {
     try { fallbackColors = { ...DEFAULT_COLORS, ...JSON.parse(existingRow.type_colors) } } catch {}
     if (existingRow.theme_start) fallbackTheme.start = existingRow.theme_start
     if (existingRow.theme_end) fallbackTheme.end = existingRow.theme_end
+    if (existingRow.slot_config_json) {
+      try { existingConfig = JSON.parse(existingRow.slot_config_json) } catch {}
+    }
   }
 
   let colors: Record<string, { bg: string; fg: string }>
   let themeStart: string
   let themeEnd: string
   let defaultSlotsPerDay = 1  // D29
+  let checkedSlots: SlotId[] = []  // D50: 用户实际勾了哪几段
   if (reset) {
     colors = DEFAULT_COLORS
     themeStart = DEFAULT_THEME.start
@@ -462,13 +480,18 @@ export async function onRequestPost(ctx: {
         themeEnd = parts[1]
       }
     }
-    // 6. D29: 4 段 checkbox 解析（按 SLOT_IDS 顺序，去重，限制 1-4）
-    const checked: SlotId[] = []
+    // 6. D29 + D50: 4 段 checkbox 解析（按 SLOT_IDS 顺序，去重，限制 1-4）
+    //     D50: 真实存勾选的数组（_default），不再只是 N
     for (const sid of SLOT_IDS) {
-      if (form.get(`slot_${sid}`)) checked.push(sid)
+      if (form.get(`slot_${sid}`)) checkedSlots.push(sid)
     }
-    defaultSlotsPerDay = Math.max(1, Math.min(4, checked.length))
+    if (checkedSlots.length === 0) checkedSlots = ["morning"]  // 至少 1 段
+    defaultSlotsPerDay = checkedSlots.length
   }
+
+  // D50: 合并 _default 到 slot_config_json（保留 per-date 覆盖）
+  const newSlotConfig = { ...existingConfig, _default: checkedSlots }
+  const slotConfigJson = JSON.stringify(newSlotConfig)
 
   // D37: 周内 3 段配重（早/中/周末），从 form input 收
   // form: weekday_early_干货=0.30, weekday_early_生活=0.30, weekday_mid_干货=0.15 ...
@@ -493,16 +516,17 @@ export async function onRequestPost(ctx: {
   const weekdayWeightsJson = JSON.stringify(weekdayWeights)
 
   await ctx.env.DB.prepare(
-    `INSERT INTO user_settings (user_id, type_colors, theme_start, theme_end, default_slots_per_day, weekday_weights_json, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO user_settings (user_id, type_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET
        type_colors = excluded.type_colors,
        theme_start = excluded.theme_start,
        theme_end = excluded.theme_end,
        default_slots_per_day = excluded.default_slots_per_day,
+       slot_config_json = excluded.slot_config_json,
        weekday_weights_json = excluded.weekday_weights_json,
        updated_at = excluded.updated_at`
-  ).bind(user.id, JSON.stringify(colors), themeStart, themeEnd, defaultSlotsPerDay, weekdayWeightsJson, Date.now()).run()
+  ).bind(user.id, JSON.stringify(colors), themeStart, themeEnd, defaultSlotsPerDay, slotConfigJson, weekdayWeightsJson, Date.now()).run()
 
   const suffix = reset ? "reset" : "1"
   return Response.redirect(getOrigin(ctx.request) + `/my/types?saved=${suffix}`, 302)
