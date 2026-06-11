@@ -6,6 +6,7 @@
 
 import { getCurrentUser } from "../lib/auth"
 import { loadUserTheme, themeCssVar } from "../lib/theme"
+import { ymdInTZ } from "../lib/schedule-constants"
 
 interface User { id: string; username: string; display_name: string | null }
 
@@ -54,7 +55,8 @@ export async function onRequestGet(ctx: {
   }))
 
   const theme = await loadUserTheme(ctx.env, user.id)
-  const currentMonth = ymd(new Date()).slice(0, 7)
+  // D55-16: 用 CST 算 currentMonth
+  const currentMonth = ymdInTZ(new Date(), "Asia/Shanghai").slice(0, 7)
 
   return new Response(renderPage(user, themes, theme, currentMonth), {
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },

@@ -6,7 +6,7 @@
 
 import { loadUserColors, typeStyle } from "./lib/type-colors"
 import { loadUserTheme, themeCssVar } from "./lib/theme"
-import { SLOTS, SLOT_IDS, DIMS, DIM_IDS, HOOK_HINTS, isSlot, SlotId, Dim, loadTopCategoryForDim } from "./lib/schedule-constants"
+import { SLOTS, SLOT_IDS, DIMS, DIM_IDS, HOOK_HINTS, isSlot, SlotId, Dim, loadTopCategoryForDim, ymdInTZ } from "./lib/schedule-constants"
 
 interface User { id: string; username: string; display_name: string | null }
 interface ScheduleRow {
@@ -50,7 +50,7 @@ function renderCalendar(
   const firstDay = new Date(year, month - 1, 1)
   const firstWeekday = firstDay.getDay()
   const daysInMonth = new Date(year, month, 0).getDate()
-  const todayStr = ymd(new Date())
+  const todayStr = ymdInTZ(new Date(), "Asia/Shanghai")
   const monthStr = `${year}-${String(month).padStart(2, "0")}`
 
   const cells: Array<{ date: string; day: number; schedules: ScheduleRow[] } | null> = []

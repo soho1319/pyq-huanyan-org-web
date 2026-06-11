@@ -11,7 +11,7 @@
 
 import { getUser, json, jsonError, readJson, CrudError, newId } from "../crud-helper"
 import {
-  DIM_IDS, isDim, ymd, addDays, type Dim,
+  DIM_IDS, isDim, ymd, ymdInTZ, addDays, type Dim,
   loadEnabledSlots, loadWeekdayWeights, SLOTS, type SlotId,
   getWeekdayPhase, getMonthlyPhase, getWeeklyTheme,
   SLOT_TONAL_WEIGHTS, WEEKEND_TONAL,
@@ -40,7 +40,8 @@ export async function onRequestPost(ctx: {
     const user = getUser(ctx)
     if (!ctx.env.DB) throw new CrudError("D1 未配置", 500)
     const body = await readJson<Record<string, unknown>>(ctx.request).catch(() => ({}))
-    const startDateStr = body.start_date ? String(body.start_date) : ymd(new Date())
+    // D55-16: 用 CST 算默认起始日
+    const startDateStr = body.start_date ? String(body.start_date) : ymdInTZ(new Date(), "Asia/Shanghai")
     const days = Math.min(Math.max(parseInt(String(body.days || "30")) || 30, 1), 90)
     const overwrite = body.overwrite === true || body.overwrite === 1
     // 可选：body.slots_per_day 显式覆盖（1-4）

@@ -17,7 +17,7 @@
 // ============================================
 
 import { getUser, json, jsonError, readJson, CrudError } from "../crud-helper"
-import { isSlot } from "../../lib/schedule-constants"
+import { isSlot, ymdInTZ } from "../../lib/schedule-constants"
 
 interface User { id: string; username: string }
 
@@ -77,11 +77,12 @@ async function buildPrompt(
   ).bind(userId).all<{ formula_id: string; variant_index: number; filled_text: string }>()
 
   // D40: 本周主题 + 本月阶段 + 7 维度提示
+  // D55-16: 强制 CST 时区
   const today = new Date()
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`
+  const todayStr = ymdInTZ(today, "Asia/Shanghai")
   const { getWeeklyTheme, getMonthlyPhase, DIMENSION_TYPE_MAP, reverseDimensionMap } = await import("../../lib/schedule-constants")
   const startOfWeek = (() => { const d = new Date(today); const wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd); return d })()
-  const weekStartStr = `${startOfWeek.getFullYear()}-${String(startOfWeek.getMonth() + 1).padStart(2, "0")}-${String(startOfWeek.getDate()).padStart(2, "0")}`
+  const weekStartStr = ymdInTZ(startOfWeek, "Asia/Shanghai")
   const weekTheme = getWeeklyTheme(weekStartStr, null)
   const monthPhase = getMonthlyPhase(todayStr.slice(0, 7), null)
 
@@ -329,7 +330,7 @@ export async function onRequestPost(ctx: {
           `INSERT INTO ai_drafts (id, user_id, date, slot, today_dim, category_id, today_type, addon, draft_1, draft_2, draft_3, model, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
-          draftId, user.id, ymd(new Date()), slot, todayDim, categoryId || null, todayDim,
+          draftId, user.id, ymdInTZ(new Date(), "Asia/Shanghai"), slot, todayDim, categoryId || null, todayDim,
           addon || null,
           drafts[0], drafts[1], drafts[2],
           ctx.env.MINIMAX_MODEL || "MiniMax-M3",
@@ -341,7 +342,7 @@ export async function onRequestPost(ctx: {
           `INSERT INTO ai_drafts (id, user_id, date, slot, today_type, addon, draft_1, draft_2, draft_3, model, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
-          draftId, user.id, ymd(new Date()), slot, todayDim, addon || null,
+          draftId, user.id, ymdInTZ(new Date(), "Asia/Shanghai"), slot, todayDim, addon || null,
           drafts[0], drafts[1], drafts[2],
           ctx.env.MINIMAX_MODEL || "MiniMax-M3",
           Date.now()

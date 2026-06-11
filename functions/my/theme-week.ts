@@ -9,7 +9,7 @@
 import { getCurrentUser } from "../lib/auth"
 import { loadUserTheme, themeCssVar } from "../lib/theme"
 import {
-  WEEKLY_THEMES, getWeeklyTheme, addDays, ymd, WeeklyThemeId,
+  WEEKLY_THEMES, getWeeklyTheme, addDays, ymd, ymdInTZ, WeeklyThemeId,
 } from "../lib/schedule-constants"
 import { startOfWeek } from "../lib/weekly"
 
@@ -36,8 +36,9 @@ export async function onRequestGet(ctx: {
   for (const r of rows.results || []) lockedMap[r.week_start] = r.theme
 
   const theme = await loadUserTheme(ctx.env, user.id)
+  // D55-16: 用 CST 算本周起始日
   const thisWeekStart = startOfWeek(new Date())
-  const thisWeekStr = ymd(thisWeekStart)
+  const thisWeekStr = ymdInTZ(thisWeekStart, "Asia/Shanghai")
   const thisWeek = getWeeklyTheme(thisWeekStr, null)
 
   return new Response(renderPage(user, thisWeekStr, thisWeek, lockedMap, theme), {

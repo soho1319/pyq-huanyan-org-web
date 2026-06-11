@@ -6,6 +6,7 @@
 
 import { getUser, json, jsonError, readJson, CrudError, newId } from "../crud-helper"
 import { loadWeekData, renderSummaryText, startOfWeek, ymd } from "../../lib/weekly"
+import { ymdInTZ } from "../../lib/schedule-constants"
 
 export async function onRequestGet(ctx: {
   request: Request
@@ -17,6 +18,7 @@ export async function onRequestGet(ctx: {
     if (!ctx.env.DB) throw new CrudError("D1 未配置", 500)
 
     const now = new Date()
+    // D55-16: 用 CST 算本周起始日
     const thisWeek = startOfWeek(now)
     const lastWeek = new Date(thisWeek)
     lastWeek.setDate(lastWeek.getDate() - 7)
@@ -27,7 +29,7 @@ export async function onRequestGet(ctx: {
     // 读 weekly_summaries 表（如果已生成过）
     const cached = await ctx.env.DB.prepare(
       "SELECT * FROM weekly_summaries WHERE user_id = ? AND week_start IN (?, ?) ORDER BY week_start DESC"
-    ).bind(user.id, ymd(thisWeek), ymd(lastWeek)).all<{
+    ).bind(user.id, ymdInTZ(thisWeek, "Asia/Shanghai"), ymdInTZ(lastWeek, "Asia/Shanghai")).all<{
       id: string; user_id: string; week_start: string; week_end: string;
       posted_count: number; skipped_count: number; pending_count: number;
       type_breakdown: string; slot_breakdown: string;

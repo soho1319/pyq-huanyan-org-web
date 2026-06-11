@@ -8,7 +8,7 @@
 
 import { getCurrentUser } from "../lib/auth"
 import { loadUserTheme, themeCssVar } from "../lib/theme"
-import { DIM_IDS, getMonthlyPhase, getWeeklyTheme, ymd, addDays, type Dim } from "../lib/schedule-constants"
+import { DIM_IDS, getMonthlyPhase, getWeeklyTheme, ymd, addDays, ymdInTZ, type Dim } from "../lib/schedule-constants"
 import { startOfWeek } from "../lib/weekly"
 
 const OLD_TYPE_TO_DIM_DASH: Record<string, Dim> = { '干货': 'F', '生活': 'E', '客户': 'B', '互动': 'G', '软广': 'C', '复盘': 'F', '休息': 'E' }
@@ -29,7 +29,8 @@ export async function onRequestGet(ctx: {
   if (!ctx.env.DB) return new Response("D1 未配置", { status: 500 })
 
   const today = new Date()
-  const yearMonth = ymd(today).slice(0, 7)
+  // D55-16: Workers 默认 UTC，强制用 CST 算 yearMonth（否则 0-8 点会算到上个月）
+  const yearMonth = ymdInTZ(today, "Asia/Shanghai").slice(0, 7)
   const monthStart = yearMonth + '-01'
   const [y, m] = yearMonth.split('-').map(Number)
   const nextMonth = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`
@@ -61,7 +62,8 @@ export async function onRequestGet(ctx: {
 
   // D36 月阶段 + 周主题
   const monthPhase = getMonthlyPhase(yearMonth, null)
-  const weekStartStr = ymd(startOfWeek(today))
+  // D55-16: 用 CST 算本周起始日
+  const weekStartStr = ymdInTZ(startOfWeek(today), "Asia/Shanghai")
   const weekTheme = getWeeklyTheme(weekStartStr, null)
 
   // 总览

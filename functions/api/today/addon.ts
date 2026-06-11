@@ -11,7 +11,7 @@
 // ============================================
 
 import { getUser, json, jsonError, readJson, CrudError, newId } from "../crud-helper"
-import { isSlot, isDim, type Dim, loadTopCategoryForDim } from "../../lib/schedule-constants"
+import { isSlot, isDim, type Dim, loadTopCategoryForDim, ymdInTZ } from "../../lib/schedule-constants"
 
 interface User { id: string }
 
@@ -53,7 +53,8 @@ export async function onRequestPost(ctx: {
     if (!isSlot(slot)) {
       throw new CrudError(`slot 必须是 morning/noon/evening/night，当前：${slot}`, 400)
     }
-    const today = ymd(new Date())
+    // D55-16: 用 CST 算 today
+    const today = ymdInTZ(new Date(), "Asia/Shanghai")
     const now = Date.now()
 
     // 查今天这 slot 是否已有排期
