@@ -112,13 +112,13 @@ export async function onRequestGet(ctx: {
     }
   }
 
+  // 查用户 enabled slots（per-date JSON 覆盖 + 默认 N 段）
+  const enabledSlots: SlotId[] = await loadEnabledSlots(ctx.env, user.id, todayStr)
+
   // D55-18: 已隐藏 slot（schedule 里有这 slot，但 enabledSlots 里没 = 用户点了"👁 隐藏"）
   const hiddenSlots: SlotId[] = (Object.keys(scheduleBySlot) as SlotId[]).filter(
     (sid) => !enabledSlots.includes(sid)
   )
-
-  // 查用户 enabled slots（per-date JSON 覆盖 + 默认 N 段）
-  const enabledSlots: SlotId[] = await loadEnabledSlots(ctx.env, user.id, todayStr)
 
   // 查今天 AI 草稿（按 slot 分组，每段最多 1 条已用）
   const todayDraftsRows = await ctx.env.DB.prepare(
