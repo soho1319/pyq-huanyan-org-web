@@ -142,7 +142,11 @@ export function getWeeklyTheme(
   userLocked: { theme: WeeklyThemeId } | null,
   cycleStart?: string | null  // D55-15: 用户 cycle 起点（YYYY-MM-DD），默认 2026-06-01
 ): { theme: WeeklyThemeId; weights: Record<string, number>; locked: boolean; cycleIndex: number; label: string } {
-  const startMs = new Date(cycleStart || '2026-06-01').getTime()
+  // D55-17: cycleStart 对齐到所在周的周一（UTC ISO weekday 0=Mon）
+  // 不对齐的话：cycleStart=周五 06-12，weekStart=周一 06-08，差 4 天 → weekDiff=-1 → cycleIndex=3（错位）
+  const cs = new Date(cycleStart || '2026-06-01')
+  const csDow = (cs.getUTCDay() + 6) % 7  // 0=Mon ... 6=Sun
+  const startMs = cs.getTime() - csDow * 86400 * 1000
   const currentMs = new Date(weekStart).getTime()
   const weekDiff = Math.floor((currentMs - startMs) / (7 * 86400 * 1000))
   const cycleIndex = ((weekDiff % 4) + 4) % 4
@@ -163,7 +167,9 @@ export function getMonthlyPhase(
     return { phase: userCycleIndex as 1|2|3, weights: MONTHLY_PHASES[userCycleIndex as 1|2|3].weights, locked: true, cycleIndex: userCycleIndex, label: MONTHLY_PHASES[userCycleIndex as 1|2|3].label }
   }
   const [y, m] = yearMonth.split('-').map(Number)
-  const startMs = new Date(cycleStart || '2026-06-01').getTime()
+  // D55-17: cycleStart 对齐到所在月 1 号（避免 day-of-month 偏移）
+  const cs = new Date(cycleStart || '2026-06-01')
+  const startMs = Date.UTC(cs.getUTCFullYear(), cs.getUTCMonth(), 1)
   const currentMs = Date.UTC(y, m - 1, 1)
   const monthDiff = Math.round((currentMs - startMs) / (30 * 86400 * 1000))
   const cycleIndex = ((monthDiff % 3) + 3) % 3 + 1

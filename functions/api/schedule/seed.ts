@@ -66,6 +66,16 @@ export async function onRequestPost(ctx: {
     ).bind(user.id, startMonth).first<{ theme: string; weights_json: string }>()
     const themeWeights = themeRow ? getThemeWeights(themeRow.theme, JSON.parse(themeRow.weights_json)) : null
 
+    // D55-17: 读用户排期开关（use_month_theme / use_week_theme / day_rule_weights_json）
+    const settingsRow = await ctx.env.DB.prepare(
+      "SELECT use_month_theme, use_week_theme, day_rule_weights_json FROM user_settings WHERE user_id = ?"
+    ).bind(user.id).first<{ use_month_theme: number; use_week_theme: number; day_rule_weights_json: string | null }>()
+    const useMonthTheme = settingsRow?.use_month_theme !== 0   // 默认 1
+    const useWeekTheme = settingsRow?.use_week_theme !== 0     // 默认 1
+    // 用户自定义 4 层权重（base/month/week/phase）总和 = 1，null = 用默认 50/20/20/10
+    const userDayWeights: { base: number; month: number; week: number; phase: number } | null =
+      settingsRow?.day_rule_weights_json ? JSON.parse(settingsRow.day_rule_weights_json) : null
+
     // D55: 直接复用 schedule-constants.ts 的 SLOT_TONAL_WEIGHTS / WEEKEND_TONAL（已严按 5 段 + 7 维度对齐）
     // 5 段口诀（每日.md + D55-3 最终版）：
     //   早 7-9   F 思想 + C 情绪 + E 生活  → 反认知金句/价值观/小确幸
@@ -76,27 +86,29 @@ export async function onRequestPost(ctx: {
     const pickWeightedType = async (slot: SlotId, date: string, isWeekend: boolean, exclude: Set<Dim> = new Set()): Promise<Dim> => {
       // L1: 5 段调性 base（按 dim 7 权重）
       const base = isWeekend ? WEEKEND_TONAL[slot] : SLOT_TONAL_WEIGHTS[slot]
-      // L2: 月主题权重（按 dim 7 权重）
+      // L2: 月主题权重（按 dim 7 权重，D55-17: useMonthTheme=0 时全用平均）
       const defaultMonthW: Record<Dim, number> = { A: 0.14, B: 0.14, C: 0.14, D: 0.15, E: 0.14, F: 0.15, G: 0.14 }
-      const monthW = (themeWeights || defaultMonthW) as Record<Dim, number>
-      // L3: 周主题权重（按 dim 7 权重）
-      const weekInfo = getWeeklyTheme(date, null)
-      const weekW = weekInfo.weights as Record<Dim, number>
+      const monthW = (useMonthTheme && themeWeights ? themeWeights : defaultMonthW) as Record<Dim, number>
+      // L3: 周主题权重（按 dim 7 权重，D55-17: 传 user.cycle_start_date，useWeekTheme=0 时用平均）
+      const defaultWeekW: Record<Dim, number> = { A: 0.14, B: 0.14, C: 0.14, D: 0.15, E: 0.14, F: 0.15, G: 0.14 }
+      const weekInfo = getWeeklyTheme(date, null, (user as any).cycle_start_date)
+      const weekW = (useWeekTheme ? weekInfo.weights : defaultWeekW) as Record<Dim, number>
       // L4: 周内 dayOfWeek phase 权重（按 dim 7 权重）
       const dayOfWeek = new Date(date + 'T00:00:00').getDay()
       const phase = getWeekdayPhase(dayOfWeek)
       const weekdayWeights = await loadWeekdayWeights(ctx.env, user.id)
       const phaseW = weekdayWeights[phase] || weekdayWeights
 
-      // 加权综合：50/20/20/10
+      // 加权综合：D55-17 支持用户自定义 4 层权重（默认 50/20/20/10）
+      const w = userDayWeights || { base: 0.5, month: 0.2, week: 0.2, phase: 0.1 }
       const combined: Record<string, number> = {}
       for (const d of DIM_IDS) {
         if (exclude.has(d as Dim)) { combined[d] = 0; continue }
         const b = base[d as Dim] || 0
         const m = monthW[d as Dim] || 0
-        const w = weekW[d as Dim] || 0
+        const wv = weekW[d as Dim] || 0
         const p = phaseW[d as Dim] || 0
-        combined[d] = b * 0.5 + m * 0.2 + w * 0.2 + p * 0.1
+        combined[d] = b * w.base + m * w.month + wv * w.week + p * w.phase
       }
       return weightedPick(combined as Record<Dim, number>)
     }

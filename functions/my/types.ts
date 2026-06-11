@@ -159,7 +159,7 @@ async function applySwatchFromQuery(env: { DB?: D1Database }, userId: string, ur
   return "saved"
 }
 
-function renderPage(currentColors: Record<string, string>, currentTheme: { start: string; end: string }, user: User, msg?: string, enabledSlots?: SlotId[], weekdayWeights?: { early: Record<string, number>; mid: Record<string, number>; weekend: Record<string, number> }): Response {
+function renderPage(currentColors: Record<string, string>, currentTheme: { start: string; end: string }, user: User, msg?: string, enabledSlots?: SlotId[], weekdayWeights?: { early: Record<string, number>; mid: Record<string, number>; weekend: Record<string, number> }, schedulePrefs?: { useMonthTheme: boolean; useWeekTheme: boolean; dayWeights: { base: number; month: number; week: number; phase: number } }): Response {
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -306,6 +306,40 @@ ${themeCssVar({ start: currentTheme.start, end: currentTheme.end, solid: current
         </div>
       </div>
 
+      <h2>🎛️ D55-17: 排期主题开关</h2>
+      <p class="muted" style="font-size:13px;margin-bottom:12px;">关闭月/周主题后，AI 排期只用 5 段调性 + weekday phase 权重（不受月主题/周主题束缚）。关闭日已经排好的不动，只是后续「重新排」会按新规则。</p>
+      <div class="toggle-row">
+        <label class="toggle">
+          <input type="checkbox" name="use_month_theme" value="1" ${schedulePrefs?.useMonthTheme !== false ? 'checked' : ''}>
+          <span>📅 启用月主题（破冰/转化/复购 3 月循环）</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" name="use_week_theme" value="1" ${schedulePrefs?.useWeekTheme !== false ? 'checked' : ''}>
+          <span>📆 启用周主题（立人设/反认知/讲故事/立边界 4 周循环）</span>
+        </label>
+      </div>
+
+      <h2>⚖️ D55-17: 4 层日排权重（总和 1.0）</h2>
+      <p class="muted" style="font-size:13px;margin-bottom:12px;">决定每段选哪个 dim 的权重分配。默认 0.5/0.2/0.2/0.1。关闭月/周主题后建议把对应权重给 base + phase。</p>
+      <div class="wd-grid">
+        <label class="wd-row">
+          <span>5 段调性 (base)</span>
+          <input type="number" name="dw_base" min="0" max="1" step="0.05" value="${(schedulePrefs?.dayWeights.base ?? 0.5).toFixed(2)}">
+        </label>
+        <label class="wd-row">
+          <span>月主题 (month)</span>
+          <input type="number" name="dw_month" min="0" max="1" step="0.05" value="${(schedulePrefs?.dayWeights.month ?? 0.2).toFixed(2)}">
+        </label>
+        <label class="wd-row">
+          <span>周主题 (week)</span>
+          <input type="number" name="dw_week" min="0" max="1" step="0.05" value="${(schedulePrefs?.dayWeights.week ?? 0.2).toFixed(2)}">
+        </label>
+        <label class="wd-row">
+          <span>weekday phase</span>
+          <input type="number" name="dw_phase" min="0" max="1" step="0.05" value="${(schedulePrefs?.dayWeights.phase ?? 0.1).toFixed(2)}">
+        </label>
+      </div>
+
       <div class="actions">
         <button type="submit" class="btn-primary">保存颜色</button>
         <button type="submit" name="reset" value="1" class="btn-link" onclick="return confirm('恢复默认颜色？')">恢复默认</button>
@@ -344,8 +378,8 @@ export async function onRequestGet(ctx: {
   if (saved === "reset") msg = "✓ 已恢复默认"
 
   const row = await ctx.env.DB.prepare(
-    "SELECT dim_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json FROM user_settings WHERE user_id = ?"
-  ).bind(user.id).first<{ dim_colors: string; theme_start: string; theme_end: string; default_slots_per_day: number | null; slot_config_json: string | null; weekday_weights_json: string | null }>()
+    "SELECT dim_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json, use_month_theme, use_week_theme, day_rule_weights_json FROM user_settings WHERE user_id = ?"
+  ).bind(user.id).first<{ dim_colors: string; theme_start: string; theme_end: string; default_slots_per_day: number | null; slot_config_json: string | null; weekday_weights_json: string | null; use_month_theme: number; use_week_theme: number; day_rule_weights_json: string | null }>()
 
   let currentColors: Record<string, string> = {}
   let currentTheme = { start: DEFAULT_THEME.start, end: DEFAULT_THEME.end }
@@ -392,7 +426,14 @@ export async function onRequestGet(ctx: {
     }
   }
   const enabledSlots = enabledSlotsFromJson ?? SLOTS.map(s => s.id)
-  return renderPage(currentColors, currentTheme, user, msg, enabledSlots, weekdayWeights)
+  // D55-17: 排期开关 + 4 层权重
+  const useMonthTheme = row ? (row.use_month_theme !== 0) : true
+  const useWeekTheme = row ? (row.use_week_theme !== 0) : true
+  let dayWeights = { base: 0.5, month: 0.2, week: 0.2, phase: 0.1 }
+  if (row?.day_rule_weights_json) {
+    try { dayWeights = { ...dayWeights, ...JSON.parse(row.day_rule_weights_json) } } catch {}
+  }
+  return renderPage(currentColors, currentTheme, user, msg, enabledSlots, weekdayWeights, { useMonthTheme, useWeekTheme, dayWeights })
 }
 
 export async function onRequestPost(ctx: {
@@ -514,9 +555,19 @@ export async function onRequestPost(ctx: {
   }
   const weekdayWeightsJson = JSON.stringify(weekdayWeights)
 
+  // D55-17: 读 use_month_theme / use_week_theme / day_rule_weights_json
+  // 关闭 = checkbox 不在 form data 里；存在 = "1"
+  const useMonthTheme = form.get("use_month_theme") === "1" ? 1 : 0
+  const useWeekTheme = form.get("use_week_theme") === "1" ? 1 : 0
+  const dwBase = parseFloat(String(form.get("dw_base") || "0.5")) || 0.5
+  const dwMonth = parseFloat(String(form.get("dw_month") || "0.2")) || 0.2
+  const dwWeek = parseFloat(String(form.get("dw_week") || "0.2")) || 0.2
+  const dwPhase = parseFloat(String(form.get("dw_phase") || "0.1")) || 0.1
+  const dayRuleWeightsJson = JSON.stringify({ base: dwBase, month: dwMonth, week: dwWeek, phase: dwPhase })
+
   await env.DB.prepare(
-    `INSERT INTO user_settings (user_id, dim_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO user_settings (user_id, dim_colors, theme_start, theme_end, default_slots_per_day, slot_config_json, weekday_weights_json, use_month_theme, use_week_theme, day_rule_weights_json, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET
        dim_colors = excluded.dim_colors,
        theme_start = excluded.theme_start,
@@ -524,8 +575,11 @@ export async function onRequestPost(ctx: {
        default_slots_per_day = excluded.default_slots_per_day,
        slot_config_json = excluded.slot_config_json,
        weekday_weights_json = excluded.weekday_weights_json,
+       use_month_theme = excluded.use_month_theme,
+       use_week_theme = excluded.use_week_theme,
+       day_rule_weights_json = excluded.day_rule_weights_json,
        updated_at = excluded.updated_at`
-  ).bind(user.id, JSON.stringify(colors), themeStart, themeEnd, defaultSlotsPerDay, slotConfigJson, weekdayWeightsJson, Date.now()).run()
+  ).bind(user.id, JSON.stringify(colors), themeStart, themeEnd, defaultSlotsPerDay, slotConfigJson, weekdayWeightsJson, useMonthTheme, useWeekTheme, dayRuleWeightsJson, Date.now()).run()
 
   const suffix = reset ? "reset" : "1"
   return Response.redirect(getOrigin(ctx.request) + `/my/dims?saved=${suffix}`, 302)
@@ -601,6 +655,10 @@ h2 { font-size: 18px; margin: 24px 0 8px; color: #2d3748; }
 .color-input { width: 44px; height: 44px; padding: 0; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; background: #fff; }
 .preview { padding: 8px 16px; border-radius: 6px; font-weight: 700; font-size: 14px; min-width: 60px; text-align: center; }
 .actions { display: flex; gap: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #edf2f7; }
+.toggle-row { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 20px; padding: 12px; background: #f7fafc; border-radius: 8px; }
+.toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
+.toggle input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; }
+.toggle span { color: #2d3748; }
 .btn-primary { padding: 10px 20px; background: linear-gradient(135deg, var(--ts) 0%, var(--te) 100%); color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
 .btn-primary:hover { opacity: 0.92; }
 .btn-link { padding: 10px 20px; color: #4a5568; background: transparent; border: none; text-decoration: none; cursor: pointer; font-size: 15px; }

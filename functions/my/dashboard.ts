@@ -60,11 +60,11 @@ export async function onRequestGet(ctx: {
     return { dim: dim as Dim, posted: n, types: [] }  // D55: 7 维度无对应 post_type 概念
   })
 
-  // D36 月阶段 + 周主题
-  const monthPhase = getMonthlyPhase(yearMonth, null)
+  // D36 月阶段 + 周主题（D55-17: 传 user.cycle_start_date 闭环）
+  const monthPhase = getMonthlyPhase(yearMonth, null, (user as any).cycle_start_date)
   // D55-16: 用 CST 算本周起始日
   const weekStartStr = ymdInTZ(startOfWeek(today), "Asia/Shanghai")
-  const weekTheme = getWeeklyTheme(weekStartStr, null)
+  const weekTheme = getWeeklyTheme(weekStartStr, null, (user as any).cycle_start_date)
 
   // 总览
   const totalRows = (rows.results || []).length

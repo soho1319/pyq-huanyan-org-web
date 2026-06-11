@@ -41,8 +41,8 @@ export async function onRequestGet(ctx: {
           cycle_index: null,
         })
       }
-      // 没锁 → 自动算
-      const auto = getWeeklyTheme(weekStart, null)
+      // 没锁 → 自动算（D55-17: 传 user.cycle_start_date）
+      const auto = getWeeklyTheme(weekStart, null, (user as any).cycle_start_date)
       return json({ ok: true, week_start: weekStart, ...auto, locked: false })
     }
 

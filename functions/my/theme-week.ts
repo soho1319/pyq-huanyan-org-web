@@ -39,7 +39,8 @@ export async function onRequestGet(ctx: {
   // D55-16: 用 CST 算本周起始日
   const thisWeekStart = startOfWeek(new Date())
   const thisWeekStr = ymdInTZ(thisWeekStart, "Asia/Shanghai")
-  const thisWeek = getWeeklyTheme(thisWeekStr, null)
+  // D55-17: 传 user.cycle_start_date 闭环
+  const thisWeek = getWeeklyTheme(thisWeekStr, null, (user as any).cycle_start_date)
 
   return new Response(renderPage(user, thisWeekStr, thisWeek, lockedMap, theme), {
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
@@ -57,9 +58,10 @@ function renderPage(
   const weekRows: Array<{ weekStart: string; theme: WeeklyThemeId; label: string; cycleIndex: number; locked: boolean; lockedTheme?: string }> = []
   let cur = new Date(thisWeekStr + 'T00:00:00')
   for (let i = 0; i < 4; i++) {
-    const ws = ymd(cur)
+    const ws = ymdInTZ(cur, "Asia/Shanghai")
     const locked = lockedMap[ws]
-    const info = getWeeklyTheme(ws, locked ? { theme: locked as WeeklyThemeId } : null)
+    // D55-17: 传 user.cycle_start_date 闭环
+    const info = getWeeklyTheme(ws, locked ? { theme: locked as WeeklyThemeId } : null, (user as any).cycle_start_date)
     weekRows.push({ weekStart: ws, ...info, lockedTheme: locked })
     cur = addDays(cur, 7)
   }

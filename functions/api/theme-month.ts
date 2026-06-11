@@ -56,9 +56,9 @@ export async function onRequestGet(ctx: {
         weights_json: string; custom_label: string | null; cycle_index: number; created_at: number; updated_at: number;
       }>()
       if (!row) {
-        // D36: 没存 → 自动算 phase
+        // D36: 没存 → 自动算 phase（D55-17: 传 user.cycle_start_date）
         const { getMonthlyPhase } = await import("../lib/schedule-constants")
-        const auto = getMonthlyPhase(month, null)
+        const auto = getMonthlyPhase(month, null, (user as any).cycle_start_date)
         return json({ ok: true, theme: null, month, auto_phase: auto.phase, auto_label: auto.label, auto_weights: auto.weights })
       }
       const weights = JSON.parse(row.weights_json)

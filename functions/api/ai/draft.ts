@@ -83,8 +83,9 @@ async function buildPrompt(
   const { getWeeklyTheme, getMonthlyPhase, DIMENSION_TYPE_MAP, reverseDimensionMap } = await import("../../lib/schedule-constants")
   const startOfWeek = (() => { const d = new Date(today); const wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd); return d })()
   const weekStartStr = ymdInTZ(startOfWeek, "Asia/Shanghai")
-  const weekTheme = getWeeklyTheme(weekStartStr, null)
-  const monthPhase = getMonthlyPhase(todayStr.slice(0, 7), null)
+  // D55-17: 传 user.cycle_start_date 闭环
+  const weekTheme = getWeeklyTheme(weekStartStr, null, (user as any).cycle_start_date)
+  const monthPhase = getMonthlyPhase(todayStr.slice(0, 7), null, (user as any).cycle_start_date)
 
   // D55: 7 维度本周已发统计（从 schedule.dim 字段直接读，不再走 reverseDimensionMap）
   const weekRows = await env.DB.prepare(

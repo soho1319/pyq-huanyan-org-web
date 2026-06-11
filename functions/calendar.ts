@@ -8,7 +8,7 @@ import { loadUserColors, typeStyle } from "./lib/type-colors"
 import { loadUserTheme, themeCssVar } from "./lib/theme"
 import { SLOTS, SLOT_IDS, DIMS, DIM_IDS, HOOK_HINTS, isSlot, SlotId, Dim, loadTopCategoryForDim, ymdInTZ } from "./lib/schedule-constants"
 
-interface User { id: string; username: string; display_name: string | null }
+interface User { id: string; username: string; display_name: string | null; cycle_start_date?: string | null }
 interface ScheduleRow {
   id: string; date: string; slot: string; post_type: string | null; dim: string | null;
   category_id: string | null; template_id: string | null;
@@ -301,7 +301,8 @@ export async function onRequestGet(ctx: {
     "SELECT theme, cycle_index FROM theme_months WHERE user_id = ? AND year_month = ?"
   ).bind(user.id, monthStr).first<{ theme: string; cycle_index: number }>()
   const { getMonthlyPhase } = await import("./lib/schedule-constants")
-  const monthPhase = getMonthlyPhase(monthStr, themeMonthRow?.cycle_index || null)
+  // D55-17: 传 user.cycle_start_date 闭环
+  const monthPhase = getMonthlyPhase(monthStr, themeMonthRow?.cycle_index || null, user.cycle_start_date)
   for (const r of allRows) {
     monthStats.byType[r.post_type] = (monthStats.byType[r.post_type] || 0) + 1
     monthStats.bySlot[r.slot] = (monthStats.bySlot[r.slot] || 0) + 1

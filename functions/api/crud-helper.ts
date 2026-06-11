@@ -10,6 +10,7 @@ export interface User {
   username: string
   display_name: string | null
   is_admin: number
+  cycle_start_date?: string | null   // D55-17: 排期起点
 }
 
 export interface CrudEnv {

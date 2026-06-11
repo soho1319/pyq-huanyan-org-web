@@ -110,10 +110,10 @@ export async function onRequestPost(ctx: {
       autoFilled = true
     }
 
-    // D36: 算本周主题 + 本月阶段 + 7 维度覆盖
+    // D36: 算本周主题 + 本月阶段 + 7 维度覆盖（D55-17: 传 user.cycle_start_date）
     const { getWeeklyTheme, getMonthlyPhase, reverseDimensionMap, DIMENSION_TYPE_MAP } = await import("../../lib/schedule-constants")
-    const weekTheme = getWeeklyTheme(data.week_start, null)
-    const monthPhase = getMonthlyPhase(data.week_start.slice(0, 7), null)
+    const weekTheme = getWeeklyTheme(data.week_start, null, (user as any).cycle_start_date)
+    const monthPhase = getMonthlyPhase(data.week_start.slice(0, 7), null, (user as any).cycle_start_date)
     // 7 维度覆盖度：本周已发 posts → 反查维度
     const dimCounts: Record<string, number> = {}
     for (const dim of Object.keys(DIMENSION_TYPE_MAP)) dimCounts[dim] = 0
