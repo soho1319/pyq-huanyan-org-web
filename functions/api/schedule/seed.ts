@@ -15,6 +15,7 @@ import {
   loadEnabledSlots, loadWeekdayWeights, SLOTS, SlotId,
   WEEKDAY_PHASE_WEIGHTS, getWeekdayPhase, getMonthlyPhase, getWeeklyTheme,
   reverseDimensionMap, DIMENSION_TYPE_MAP,
+  SLOT_TONAL_WEIGHTS, WEEKEND_TONAL, computeDaySuggestions,
 } from "../../lib/schedule-constants"
 import { getThemeWeights } from "../theme-month"
 
@@ -65,44 +66,21 @@ export async function onRequestPost(ctx: {
     ).bind(user.id, startMonth).first<{ theme: string; weights_json: string }>()
     const themeWeights = themeRow ? getThemeWeights(themeRow.theme, JSON.parse(themeRow.weights_json)) : null
 
-    // D44: 4 段各自的"调性"权重（按课程"日排口诀"严诼对齐）
-    // 课程口诀:早起发思想/生活,中午发专业/案例,晚上发故事/报喜
-    // 早 7-9 (早 8) = 思想+生活 → 干货(思想)+生活+复盘(思想)
-    // 午 12-14 (午 12:30) = 专业+案例 → 干货(专业)+客户(专业)+软广
-    // 晚 20-22 (晚 20) = 故事+报喜 → 复盘(故事)+客户(报喜)+互动(关系)
-    // 夜 22-22:30 = 反思(课程未明说,推反思) → 复盘+互动+干货
-    const SLOT_TONAL_WEIGHTS: Record<SlotId, Record<string, number>> = {
-      morning: { "干货": 0.40, "生活": 0.25, "复盘": 0.20, "客户": 0.10, "互动": 0.05 },
-      noon:    { "干货": 0.30, "客户": 0.25, "软广": 0.20, "互动": 0.10, "复盘": 0.08, "生活": 0.05, "休息": 0.02 },
-      evening: { "复盘": 0.25, "客户": 0.20, "互动": 0.20, "软广": 0.15, "干货": 0.10, "生活": 0.10 },
-      night:   { "复盘": 0.40, "互动": 0.25, "干货": 0.15, "生活": 0.10, "客户": 0.05, "软广": 0.05 },
-    }
-    // 周末: 早 8 偏生活/休息, 午 12:30 偏生活/互动(周末放松), 晚 20 软广/客户/生活(休闲种草), 夜 22:30 复盘/生活/休息(周末复盘)
-    const WEEKEND_TONAL: Record<SlotId, Record<string, number>> = {
-      morning: { "生活": 0.35, "休息": 0.25, "干货": 0.15, "复盘": 0.10, "客户": 0.10, "互动": 0.05 },
-      noon:    { "生活": 0.35, "互动": 0.25, "休息": 0.15, "客户": 0.10, "干货": 0.10, "软广": 0.05 },
-      evening: { "软广": 0.25, "客户": 0.20, "生活": 0.20, "互动": 0.15, "干货": 0.10, "复盘": 0.10 },
-      night:   { "复盘": 0.30, "生活": 0.25, "休息": 0.20, "互动": 0.15, "干货": 0.10 },
-    }
-
-    // 联合权重：base × 0.7 + theme × 0.3（base 主导，theme 微调）
-    // D36: 升级为 4 层权重（base 50% + month 20% + week 20% + phase 10%）
-    const pickWeightedType = async (slot: SlotId, date: string, isWeekend: boolean): Promise<string> => {
+    // D53: 直接复用 schedule-constants.ts 的 SLOT_TONAL_WEIGHTS / WEEKEND_TONAL（D52 已严按课程日排对齐）
+    // 课程口诀（每日.md）：
+    //   早 7-9   思想+生活  → 晨间感悟/小确幸/价值观金句
+    //   午 12-14 专业+观赏  → 痛点拆解/用户案例/干货结构（建议 1-2 条）
+    //   晚 20-22 关系+互动  → 故事/社群互动/报喜/种草（建议 1-2 条）
+    //   夜 22:30 反思收尾  → 复盘+互动+休息
+    const pickWeightedType = async (slot: SlotId, date: string, isWeekend: boolean, exclude: Set<string> = new Set()): Promise<string> => {
       // L1: 4 段调性 base
       const base = isWeekend ? WEEKEND_TONAL[slot] : SLOT_TONAL_WEIGHTS[slot]
-      // D36: noon 段调"专业/案例"（课程日排口诀：午 专业/案例）
-      const baseAdj = slot === 'noon'
-        ? { '干货': 0.35, '客户': 0.25, '互动': 0.15, '生活': 0.10, '复盘': 0.08, '软广': 0.05, '休息': 0.02 }
-        : base
-
       // L2: 月主题权重
       const monthW = themeWeights || { '干货': 0.15, '生活': 0.15, '客户': 0.14, '互动': 0.14, '软广': 0.14, '复盘': 0.14, '休息': 0.14 }
-
-      // L3: 周主题权重（自动循环）
+      // L3: 周主题权重
       const weekInfo = getWeeklyTheme(date, null)
       const weekW = weekInfo.weights
-
-      // L4: 周内 dayOfWeek phase 权重（D37: 读 user 自定义，否则用 D36 默认）
+      // L4: 周内 dayOfWeek phase 权重
       const dayOfWeek = new Date(date + 'T00:00:00').getDay()
       const phase = getWeekdayPhase(dayOfWeek)
       const weekdayWeights = await loadWeekdayWeights(ctx.env, user.id)
@@ -111,7 +89,8 @@ export async function onRequestPost(ctx: {
       // 加权综合：50/20/20/10
       const combined: Record<string, number> = {}
       for (const t of ROTATION) {
-        const b = baseAdj[t] || 0
+        if (exclude.has(t)) { combined[t] = 0; continue }  // D53 第 2 条排除已选
+        const b = base[t] || 0
         const m = monthW[t] || 0
         const w = weekW[t] || 0
         const p = phaseW[t] || 0
@@ -139,29 +118,37 @@ export async function onRequestPost(ctx: {
 
       // 找这天已存在的 (slot, status) — D41: overwrite 时跳过 posted
       const existingRows = await ctx.env.DB.prepare(
-        "SELECT slot, status FROM schedule WHERE user_id = ? AND date = ?"
-      ).bind(user.id, date).all<{ slot: string; status: string }>()
-      const existingSet = new Set((existingRows.results || []).map(r => r.slot))
-      const existingStatusMap = new Map((existingRows.results || []).map(r => [r.slot, r.status]))
+        "SELECT slot, status, sort_order FROM schedule WHERE user_id = ? AND date = ?"
+      ).bind(user.id, date).all<{ slot: string; status: string; sort_order: number }>()
+      // D53: 跟踪已选的 post_type，第 2 条（sort_order=1）排除第 1 条
+      const existingSlotSet = new Set((existingRows.results || []).map(r => `${r.slot}:${r.sort_order || 0}`))
+      const existingStatusMap = new Map((existingRows.results || []).map(r => [`${r.slot}:${r.sort_order || 0}`, r.status]))
 
-      const toInsert: Array<{ slot: SlotId; post_type: string; template_id: string }> = []
-      const toUpdate: Array<{ slot: SlotId; post_type: string; template_id: string }> = []
+      // D53: 午/晚 默认 2 条（top1 sort_order=0 + top2 sort_order=1），早/夜 1 条
+      const SLOT_DEFAULT_ROWS: Record<SlotId, number> = { morning: 1, noon: 2, evening: 2, night: 1 }
+
+      const toInsert: Array<{ slot: SlotId; post_type: string; template_id: string; sort_order: number }> = []
+      const toUpdate: Array<{ slot: SlotId; post_type: string; template_id: string; sort_order: number }> = []
       for (const slot of slots) {
-        // D34: 每段独立按"调性 + 主题月"选 type
-        // D36: 升级为 4 层权重（base 50% + month 20% + week 20% + phase 10%）
-        const slotType = await pickWeightedType(slot, date, isWeekend)
-        const slotTpl = TYPE_TO_TEMPLATE[slotType]
-        if (existingSet.has(slot)) {
-          if (overwrite) {
-            // D41: 已发的（status=posted）保留 — 不动 post_type / template_id
-            if (existingStatusMap.get(slot) === 'posted') {
-              skipped++
-            } else {
-              toUpdate.push({ slot, post_type: slotType, template_id: slotTpl })
-            }
-          } else skipped++
-        } else {
-          toInsert.push({ slot, post_type: slotType, template_id: slotTpl })
+        const rowCount = SLOT_DEFAULT_ROWS[slot] || 1
+        const usedTypes = new Set<string>()
+        for (let ord = 0; ord < rowCount; ord++) {
+          // D34: 每段独立按"调性 + 主题月"选 type；第 2 条排除第 1 条
+          const slotType = await pickWeightedType(slot, date, isWeekend, usedTypes)
+          usedTypes.add(slotType)
+          const slotTpl = TYPE_TO_TEMPLATE[slotType]
+          const key = `${slot}:${ord}`
+          if (existingSlotSet.has(key)) {
+            if (overwrite) {
+              if (existingStatusMap.get(key) === 'posted') {
+                skipped++
+              } else {
+                toUpdate.push({ slot, post_type: slotType, template_id: slotTpl, sort_order: ord })
+              }
+            } else skipped++
+          } else {
+            toInsert.push({ slot, post_type: slotType, template_id: slotTpl, sort_order: ord })
+          }
         }
       }
 
@@ -169,18 +156,18 @@ export async function onRequestPost(ctx: {
       if (toUpdate.length > 0) {
         for (const r of toUpdate) {
           await ctx.env.DB.prepare(
-            "UPDATE schedule SET post_type = ?, template_id = ?, updated_at = ? WHERE user_id = ? AND date = ? AND slot = ?"
-          ).bind(r.post_type, r.template_id, now, user.id, date, r.slot).run()
+            "UPDATE schedule SET post_type = ?, template_id = ?, updated_at = ? WHERE user_id = ? AND date = ? AND slot = ? AND sort_order = ?"
+          ).bind(r.post_type, r.template_id, now, user.id, date, r.slot, r.sort_order).run()
           updated++
         }
       }
 
       // batch INSERT（一次往返）
       if (toInsert.length > 0) {
-        const placeholders = toInsert.map(() => "(?, ?, ?, ?, ?, ?, 'pending', NULL, 0, ?)").join(",")
+        const placeholders = toInsert.map(() => "(?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?)").join(",")
         const values: unknown[] = []
         for (const r of toInsert) {
-          values.push(newId(), user.id, date, r.slot, r.post_type, r.template_id, now)
+          values.push(newId(), user.id, date, r.slot, r.post_type, r.template_id, r.sort_order, now)
         }
         await ctx.env.DB.prepare(
           `INSERT INTO schedule (id, user_id, date, slot, post_type, template_id, status, note, sort_order, updated_at) VALUES ${placeholders}`

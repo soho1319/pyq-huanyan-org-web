@@ -334,7 +334,7 @@ export const HOOK_HINTS: Record<string, string> = {
 //   夜 22:30 反思/收尾  (课程没明说, 偏复盘+互动+休息)
 // 7 维度 → 7 type 映射（D36 DIMENSION_TYPE_MAP）:
 //   思想=[干货,复盘]  生活=[生活,休息]  专业=[干货,客户,软广]  关系=[互动,软广]  原生=[生活,互动]  链接=[互动,软广]
-const SLOT_TONAL_WEIGHTS: Record<SlotId, Record<string, number>> = {
+export const SLOT_TONAL_WEIGHTS: Record<SlotId, Record<string, number>> = {
   // 早: 思想(50%)+生活(50%) → 生活排前(晨间感悟/小确幸) + 干货(思想)/复盘(思想) 并列
   morning: { "生活": 0.35, "干货": 0.20, "复盘": 0.20, "休息": 0.10, "客户": 0.10, "互动": 0.05 },
   // 午: 专业(60%)+原生(20%) → 干货排前(专业) + 客户(专业案例) + 软广(专业种草)
@@ -346,7 +346,7 @@ const SLOT_TONAL_WEIGHTS: Record<SlotId, Record<string, number>> = {
 }
 
 // 周末(D52): 保持"放松"调性但仍按课程日排：早=生活/休息优先, 午=生活/互动, 晚=互动/软广, 夜=休息/复盘
-const WEEKEND_TONAL: Record<SlotId, Record<string, number>> = {
+export const WEEKEND_TONAL: Record<SlotId, Record<string, number>> = {
   morning: { "生活": 0.40, "休息": 0.25, "干货": 0.10, "复盘": 0.10, "客户": 0.10, "互动": 0.05 },
   noon:    { "生活": 0.30, "互动": 0.20, "休息": 0.15, "客户": 0.10, "干货": 0.10, "软广": 0.10, "复盘": 0.05 },
   evening: { "互动": 0.25, "软广": 0.20, "生活": 0.20, "客户": 0.15, "干货": 0.10, "复盘": 0.10 },

@@ -475,7 +475,6 @@ ${themeCssVar(theme)}
       <div class="weekday">${weekday}</div>
     </div>
 
-    ${daySuggestion ? renderDaySuggestion(daySuggestion, colors) : ''}
     ${daySuggestionError ? `<div style="background:#fed7d7;color:#c53030;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;">[D42-E] 明日建议计算失败：${escapeHtml(daySuggestionError)}</div>` : ''}
 
     <section class="slot-cards-area">
@@ -507,6 +506,7 @@ ${themeCssVar(theme)}
           <div class="card-head">
             <h3>⏰ ${meta.label} ${meta.time}</h3>
             <span class="status status-${r?.status || 'pending'}">${statusText}</span>
+            ${(sid === 'morning' || sid === 'noon' || sid === 'evening') ? `<button type="button" class="btn-skip-slot" data-skip-slot="${sid}" data-skip-date="${todayStr}" title="今日不发这${meta.label}（到 📅 日历 可恢复）">⏸ 今日不发</button>` : ''}
           </div>
           <div class="type-badge" style="${schedTypeCss}">${schedType}</div>
           <p class="type-tip">${escapeHtml(TYPE_TIPS[schedType] || '')}</p>
@@ -602,6 +602,8 @@ ${themeCssVar(theme)}
       ` : ''}
       <div id="weeklySummaryText" class="weekly-summary-text" style="display:none"></div>
     </section>
+
+    ${daySuggestion ? renderDaySuggestion(daySuggestion, colors) : ''}
 
     <section class="card dim-coverage-card">
       <div class="card-head">
@@ -843,6 +845,36 @@ ${themeCssVar(theme)}
           }).catch(() => { seedBtn.textContent = '重试'; seedBtn.disabled = false })
       }
     }
+
+    // D53: "⏸ 今日不发" 按钮 — 早/午/晚 段
+    document.querySelectorAll('.btn-skip-slot').forEach(btn => {
+      btn.onclick = async () => {
+        const slot = btn.getAttribute('data-skip-slot')
+        const date = btn.getAttribute('data-skip-date')
+        if (!slot || !date) return
+        if (!confirm(\`今天 \${slot} 段不发？\\n（会从今日要发列表移除，schedule 标为 skipped；到 📅 日历可恢复）\\n\\n点确定后页面会刷新。\`)) return
+        btn.disabled = true
+        btn.textContent = '⏳ 处理中...'
+        try {
+          const r = await fetch('/api/today/skip-slot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date, slot, restore: false }),
+          })
+          const data = await r.json()
+          if (data.ok) {
+            btn.textContent = '✓ 已隐藏'
+            setTimeout(() => location.reload(), 400)
+          } else {
+            btn.textContent = '✗ 失败'
+            btn.disabled = false
+          }
+        } catch (err) {
+          btn.textContent = '✗ ' + (err?.message || '网络错')
+          btn.disabled = false
+        }
+      }
+    })
 
     // D41: "重新排今天" 按钮 — overwrite=true 仅 1 天，posted 不动
     const reseedBtn = document.getElementById('reseedTodayBtn')
@@ -1140,6 +1172,8 @@ main { max-width: 760px; margin: 0 auto; padding: 20px; }
 .reseed-today-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 12px; background: linear-gradient(135deg, rgba(102,126,234,0.06) 0%, rgba(118,75,162,0.02) 100%); border: 1px dashed rgba(102,126,234,0.3); border-radius: 8px; }
 .btn-reseed-today { padding: 6px 14px; background: #fff; color: var(--t); border: 1px solid var(--t); border-radius: 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .btn-reseed-today:hover { background: var(--t); color: #fff; }
+.btn-skip-slot { margin-left: 8px; padding: 3px 10px; background: transparent; color: #a0aec0; border: 1px solid #cbd5e0; border-radius: 12px; font-size: 11px; cursor: pointer; }
+.btn-skip-slot:hover { background: #fed7d7; color: #c53030; border-color: #fc8181; }
 .btn-reseed-today:disabled { opacity: 0.6; cursor: not-allowed; }
 .reseed-hint { font-size: 11px; }
 /* D42-E: 明日建议卡片 */
