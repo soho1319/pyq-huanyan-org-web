@@ -896,7 +896,8 @@ main { max-width: 760px; margin: 0 auto; padding: 20px; }
 .type-软广 { background: #fff5f5; color: #c53030; }
 .type-复盘 { background: #f0fff4; color: #22543d; }
 .type-休息 { background: #edf2f7; color: #4a5568; }
-.type-tip { color: #4a5568; font-size: 14px; margin: 4px 0 12px; }
+.type-tip { color: #4a5568; font-size: 14px; margin: 4px 0 12px; white-space: pre-line; line-height: 1.65; }
+.type-tip::first-line { font-weight: 600; color: #2d3748; }
 .template { color: #4a5568; font-size: 14px; margin-bottom: 12px; }
 .template code { background: #edf2f7; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
 .note-box {
