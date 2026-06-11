@@ -8,7 +8,8 @@
 
 import { getCurrentUser } from "../lib/auth"
 import { loadUserTheme, themeCssVar } from "../lib/theme"
-import { DIMENSION_TYPE_MAP, reverseDimensionMap, getMonthlyPhase, getWeeklyTheme, ymd, addDays, startOfWeek } from "../lib/schedule-constants"
+import { DIMENSION_TYPE_MAP, reverseDimensionMap, getMonthlyPhase, getWeeklyTheme, ymd, addDays } from "../lib/schedule-constants"
+import { startOfWeek } from "../lib/weekly"
 
 interface User { id: string; username: string; display_name: string | null }
 

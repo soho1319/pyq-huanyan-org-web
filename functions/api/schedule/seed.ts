@@ -86,7 +86,7 @@ export async function onRequestPost(ctx: {
 
     // 联合权重：base × 0.7 + theme × 0.3（base 主导，theme 微调）
     // D36: 升级为 4 层权重（base 50% + month 20% + week 20% + phase 10%）
-    const pickWeightedType = (slot: SlotId, date: string, isWeekend: boolean): string => {
+    const pickWeightedType = async (slot: SlotId, date: string, isWeekend: boolean): Promise<string> => {
       // L1: 4 段调性 base
       const base = isWeekend ? WEEKEND_TONAL[slot] : SLOT_TONAL_WEIGHTS[slot]
       // D36: noon 段调"专业/案例"（课程日排口诀：午 专业/案例）
@@ -147,7 +147,7 @@ export async function onRequestPost(ctx: {
       for (const slot of slots) {
         // D34: 每段独立按"调性 + 主题月"选 type
         // D36: 升级为 4 层权重（base 50% + month 20% + week 20% + phase 10%）
-        const slotType = pickWeightedType(slot, date, isWeekend)
+        const slotType = await pickWeightedType(slot, date, isWeekend)
         const slotTpl = TYPE_TO_TEMPLATE[slotType]
         if (existingSet.has(slot)) {
           if (overwrite) toUpdate.push({ slot, post_type: slotType, template_id: slotTpl })
