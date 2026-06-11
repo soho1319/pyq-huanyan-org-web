@@ -1,44 +1,25 @@
 // ============================================
-// pyq.huanyan.org · CF Pages Function: /login
+// pyq-huanyan-org-web-saas · CF Pages Function: /login（多用户版）
 //
-// GET  → 渲染登录表单（HTML）
-// POST → 验证账号密码 → 通过则 Set-Cookie（pyq_session, 7 天）
-//        → 302 重定向到 ?next= 或 /
-//        → 失败回 401 + 表单 + 错误提示
+// GET  → 渲染登录表单
+// POST → 按 username 查 D1 → 验密码 → 设置签名 cookie（带 userid）→ 302
+//        失败 → 401 + 表单 + 错误提示
 //
-// 支持 form-urlencoded / multipart / JSON（兼容性好）
+// Cookie 格式：<expiry>.<username>.<userid>.<sig>
 // ============================================
 
-interface Env {
-  BASIC_AUTH_USER?: string
-  BASIC_AUTH_PASSWORD?: string
-  SESSION_SECRET?: string
-}
+import {
+  buildSessionCookie,
+  getCurrentUser,
+  hashPassword,
+  signSessionCookie,
+  verifyPassword,
+  type Env as AuthEnv,
+} from "./lib/auth"
 
-const COOKIE_NAME = "pyq_session"
-const SESSION_TTL = 60 * 60 * 24 * 7 // 7 天
-
-async function hmac(key: string, data: string): Promise<string> {
-  const enc = new TextEncoder()
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(key),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  )
-  const sig = await crypto.subtle.sign("HMAC", cryptoKey, enc.encode(data))
-  return btoa(String.fromCharCode(...new Uint8Array(sig)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "")
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  let out = 0
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  return out === 0
+interface Env extends AuthEnv {
+  D1_PASSWORD_PEPPER?: string
+  DB?: D1Database
 }
 
 function escapeHtml(s: string): string {
@@ -56,9 +37,10 @@ function safeNextPath(input: string | null): string {
 function renderLoginPage(
   error: string,
   username: string,
-  nextPath: string
+  nextPath: string,
+  origin: string
 ): Response {
-  const action = "/login" + (nextPath && nextPath !== "/" ? "?next=" + encodeURIComponent(nextPath) : "")
+  const action = origin.replace(/\/$/, "") + "/login" + (nextPath && nextPath !== "/" ? "?next=" + encodeURIComponent(nextPath) : "")
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -87,7 +69,7 @@ function renderLoginPage(
 </style>
 </head>
 <body>
-  <form class="card" method="POST" action="${action}">
+  <form class="card" method="POST" action="${escapeHtml(action)}">
     <h1>🔐 登录</h1>
     <div class="subtitle">内容营销朋友圈小助手 · pyq.huanyan.org</div>
     ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
@@ -100,26 +82,38 @@ function renderLoginPage(
       <input type="password" id="password" name="password" autocomplete="current-password" required>
     </div>
     <button type="submit">登 入</button>
-    <div class="hint">输入正确的账号密码即可访问网站</div>
+    <div class="hint">输入你的账号密码即可访问</div>
   </form>
 </body>
 </html>`
   return new Response(html, {
     status: error ? 401 : 200,
-    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
   })
 }
 
 export async function onRequest(context: {
   request: Request
   env: Env
+  data: Record<string, unknown>
 }): Promise<Response> {
-  const { request, env } = context
+  const { request, env, data } = context
   const url = new URL(request.url)
   const nextParam = safeNextPath(url.searchParams.get("next"))
 
+  // 取得 origin（处理反代场景）
+  const fwdHost = request.headers.get("X-Forwarded-Host") || url.host
+  const fwdProto = request.headers.get("X-Forwarded-Proto") || url.protocol.replace(":", "")
+  const origin = `${fwdProto}://${fwdHost}`
+
+  // 已登录 → 直接跳走
+  const existing = await getCurrentUser(request, env)
+  if (existing) {
+    return Response.redirect(origin.replace(/\/$/, "") + nextParam, 302)
+  }
+
   if (request.method === "GET") {
-    return renderLoginPage("", "", nextParam)
+    return renderLoginPage("", "", nextParam, origin)
   }
 
   if (request.method !== "POST") {
@@ -129,60 +123,86 @@ export async function onRequest(context: {
     })
   }
 
-  // 解析 body（form / multipart / json 三种都兼容）
+  // 解析 body
   let username = ""
   let password = ""
   try {
     const ct = (request.headers.get("Content-Type") || "").toLowerCase()
     if (ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data")) {
       const form = await request.formData()
-      username = String(form.get("username") || "")
+      username = String(form.get("username") || "").trim()
       password = String(form.get("password") || "")
     } else if (ct.includes("application/json")) {
       const body = (await request.json()) as Record<string, unknown>
-      username = String(body.username || "")
+      username = String(body.username || "").trim()
       password = String(body.password || "")
     } else {
-      // 兜底：当作 form
       const text = await request.text()
       const params = new URLSearchParams(text)
-      username = params.get("username") || ""
+      username = (params.get("username") || "").trim()
       password = params.get("password") || ""
     }
   } catch {
-    return renderLoginPage("请求格式错误", username, nextParam)
+    return renderLoginPage("请求格式错误", username, nextParam, origin)
   }
 
-  const expectedUser = env.BASIC_AUTH_USER || "admin"
-  const expectedPassword = env.BASIC_AUTH_PASSWORD
-  if (!expectedPassword) {
-    return new Response("服务未配置 BASIC_AUTH_PASSWORD 环境变量", {
+  if (!username || !password) {
+    return renderLoginPage("请输入账号和密码", username, nextParam, origin)
+  }
+
+  if (!env.DB) {
+    return new Response("服务未配置 D1 数据库", {
+      status: 500,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    })
+  }
+  if (!env.SESSION_SECRET) {
+    return new Response("服务未配置 SESSION_SECRET 环境变量", {
       status: 500,
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     })
   }
 
-  if (
-    username.length > 0 &&
-    timingSafeEqual(username, expectedUser) &&
-    timingSafeEqual(password, expectedPassword)
-  ) {
-    // 设置签名 cookie
-    const expiry = Math.floor(Date.now() / 1000) + SESSION_TTL
-    const secret = env.SESSION_SECRET || expectedPassword
-    const payload = `${expiry}.${username}`
-    const sig = await hmac(secret, payload)
-    const cookieValue = `${payload}.${sig}`
-    const cookie = `${COOKIE_NAME}=${cookieValue}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL}`
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: nextParam,
-        "Set-Cookie": cookie,
-        "Cache-Control": "no-store",
-      },
-    })
+  // 查 user
+  const row = await env.DB.prepare(
+    "SELECT id, username, password_hash, display_name, is_admin FROM users WHERE username = ?"
+  ).bind(username).first<{
+    id: string
+    username: string
+    password_hash: string
+    display_name: string | null
+    is_admin: number
+  } | null>()
+
+  if (!row) {
+    return renderLoginPage("账号或密码错误", username, nextParam, origin)
   }
 
-  return renderLoginPage("账号或密码错误", username, nextParam)
+  const ok = await verifyPassword(password, row.password_hash, env.D1_PASSWORD_PEPPER || "")
+  if (!ok) {
+    return renderLoginPage("账号或密码错误", username, nextParam, origin)
+  }
+
+  // 签发 session cookie
+  const cookieValue = await signSessionCookie(
+    { username: row.username, id: row.id },
+    env.SESSION_SECRET
+  )
+
+  // 设置 context.data 供下游使用
+  data.user = {
+    id: row.id,
+    username: row.username,
+    display_name: row.display_name,
+    is_admin: row.is_admin,
+  }
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: nextParam,
+      "Set-Cookie": buildSessionCookie(cookieValue),
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    },
+  })
 }

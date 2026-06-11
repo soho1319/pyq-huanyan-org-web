@@ -1,5 +1,4 @@
 import * as Component from "./quartz/components"
-import PromptToolbox from "./components/PromptToolbox"
 import UserBar from "./components/UserBar"
 
 export const sharedPageComponents = {
@@ -17,7 +16,6 @@ export const defaultContentPageLayout = {
     Component.ArticleTitle(),
     Component.ContentMeta(),
     Component.TagList(),
-    PromptToolbox(),
   ],
   left: [
     Component.PageTitle(),

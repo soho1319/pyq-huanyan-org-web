@@ -1,10 +1,16 @@
-# Cloudflare Pages · pyq-huanyan-org-web（国际站）
+# Cloudflare Pages · pyq（v2 · 多用户 SaaS）
 # CF Pages 不支持 wrangler.toml里的 [build] section
 # Build 配置必须在 CF Dashboard UI 上设置
 
-name = "pyq-huanyan-org-web"
+name = "pyq"
 compatibility_date = "2024-06-20"
 pages_build_output_dir = "./vendor/quartz/public"
+
+# D1 数据库绑定
+[[d1_databases]]
+binding = "DB"
+database_name = "pyq-db"
+database_id = "27eded01-6aee-444f-886f-259648d91562"
 
 #部署流程：
 #1. CF Dashboard → Pages → Connect to Git → soho1319/pyq-huanyan-org-web
