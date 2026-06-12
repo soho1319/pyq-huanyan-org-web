@@ -987,14 +987,22 @@ ${themeCssVar(theme)}
     // D29: per-slot AI 帮写
     document.querySelectorAll('.btn-ai-slot').forEach(btn => {
       btn.onclick = async () => {
+        console.log('[D55-19] AI 按钮被点击')
         const slot = btn.dataset.slot
         const todayDim = btn.dataset.dim
         const todayType = btn.dataset.type
         const addon = btn.dataset.addon || ''
         const subtheme = btn.dataset.subtheme || ''
         // D55-19: 先弹"选参考"弹窗，用户勾选后再调 /api/ai/draft
-        const selectedIds = await openAiRefModal(todayDim, slot)
-        if (!selectedIds) return  // 用户取消
+        let selectedIds
+        try {
+          selectedIds = await openAiRefModal(todayDim, slot)
+        } catch (err) {
+          console.error('[D55-19] 弹窗出错:', err)
+          alert('AI 弹窗打开失败：' + (err?.message || err) + '\n\n降级：直接生成（不选参考）')
+          selectedIds = []  // 降级到无参考
+        }
+        if (selectedIds === null) return  // 用户取消
         const status = document.getElementById('aiStatus_' + slot)
         const draftsBox = document.getElementById('aiDrafts_' + slot)
         btn.disabled = true
