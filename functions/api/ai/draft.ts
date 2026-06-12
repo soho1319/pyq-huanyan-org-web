@@ -58,7 +58,8 @@ async function buildPrompt(
   userId: string,
   todayDim: string,
   categoryId: string | undefined,
-  addon: string | undefined
+  addon: string | undefined,
+  refCategoryIds: string[] | undefined
 ): Promise<string> {
   if (!env.DB) throw new CrudError("D1 未配置", 500)
 
@@ -156,6 +157,28 @@ async function buildPrompt(
       // migration 还没跑 → 忽略
     }
   }
+  // D55-19: 用户勾选的参考 categories（最多 12 个防 prompt 爆）
+  let refCategoriesBlock = ""
+  if (refCategoryIds && refCategoryIds.length > 0 && env.DB) {
+    try {
+      const placeholders = refCategoryIds.slice(0, 12).map(() => "?").join(",")
+      const refCats = await env.DB.prepare(
+        `SELECT id, dim, category, subcategory, name, description, ai_prompt_focus, slot FROM categories WHERE id IN (${placeholders}) AND is_active = 1`
+      ).bind(...refCategoryIds.slice(0, 12)).all<{ id: string; dim: string; category: string; subcategory: string; name: string; description: string | null; ai_prompt_focus: string | null; slot: string }>()
+      if (refCats.results && refCats.results.length > 0) {
+        // 按 dim 分组
+        const byDim: Record<string, Array<{ id: string; dim: string; category: string; subcategory: string; name: string; description: string | null; ai_prompt_focus: string | null; slot: string }>> = {}
+        for (const c of refCats.results) {
+          if (!byDim[c.dim]) byDim[c.dim] = []
+          byDim[c.dim].push(c)
+        }
+        const sections = Object.entries(byDim).sort().map(([dim, cats]) => {
+          return `**${dim}**：${cats.map(c => `${c.category}·${c.subcategory}（${c.description || '无说明'}；重点：${c.ai_prompt_focus || '无'}；时段：${c.slot}）`).join('；')}`
+        })
+        refCategoriesBlock = `\n### D55-19 用户勾选的参考方向（共 ${refCats.results.length} 个）\n${sections.join('\n')}\n请综合参考以上方向，但不强求全部覆盖——选 1-2 个最有感觉的方向深写即可`
+      }
+    } catch {}
+  }
   // HOOK_HINTS 按 dim 取首行作为快速钩子
   const dimHook = (HOOK_HINTS[todayDim] || '').split('\n').find(l => l.trim()) || ''
   const dimName = DIMS.find(d => d.id === todayDim)?.name || todayDim
@@ -169,7 +192,7 @@ ${PUBLIC_FORMULAS}
 ====================================
 用户素材
 ====================================
-${introsBlock}${casesBlock}${quotesBlock}${formulasBlock}${addonBlock}${subthemeBlock}${categoryBlock}${frameBlock}
+${introsBlock}${casesBlock}${quotesBlock}${formulasBlock}${addonBlock}${subthemeBlock}${categoryBlock}${frameBlock}${refCategoriesBlock}
 
 ====================================
 今日任务（D55 彻底 dim）
@@ -291,6 +314,7 @@ export async function onRequestPost(ctx: {
       addon?: string
       slot?: string
       subtheme?: string
+      ref_category_ids?: string[]  // D55-19: 用户勾选的参考 categories（多选）
     }>(ctx.request)
 
     // D55: dim 解析（优先 todayDim，回退到 todayType 映射）
@@ -310,11 +334,15 @@ export async function onRequestPost(ctx: {
     const addon = body.addon ? String(body.addon).trim() : undefined
     const slot = body.slot ? String(body.slot) : "morning"
     const subtheme = body.subtheme ? String(body.subtheme).trim() : undefined
+    // D55-19: 解析勾选的参考 categories
+    const refCategoryIds: string[] | undefined = Array.isArray(body.ref_category_ids)
+      ? body.ref_category_ids.filter((s): s is string => typeof s === 'string' && s.length > 0).slice(0, 12)
+      : undefined
     if (!isSlot(slot)) {
       throw new CrudError(`slot 必须是 morning/noon/evening/late/night，当前：${slot}`, 400)
     }
 
-    const prompt = await buildPrompt(ctx.env, user.id, todayDim, categoryId, addon)
+    const prompt = await buildPrompt(ctx.env, user.id, todayDim, categoryId, addon, refCategoryIds)
     const text = await callMiniMax(prompt, ctx.env)
     const drafts = parseDrafts(text)
 
@@ -326,13 +354,14 @@ export async function onRequestPost(ctx: {
     if (ctx.env.DB) {
       draftId = crypto.randomUUID()
       try {
-        // D55+ 完整 schema（加 today_dim + category_id）
+        // D55-19: 完整 schema（含 today_dim + category_id + ref_category_ids_json）
         await ctx.env.DB.prepare(
-          `INSERT INTO ai_drafts (id, user_id, date, slot, today_dim, category_id, today_type, addon, draft_1, draft_2, draft_3, model, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO ai_drafts (id, user_id, date, slot, today_dim, category_id, ref_category_ids_json, today_type, addon, draft_1, draft_2, draft_3, model, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
-          draftId, user.id, ymdInTZ(new Date(), "Asia/Shanghai"), slot, todayDim, categoryId || null, todayDim,
-          addon || null,
+          draftId, user.id, ymdInTZ(new Date(), "Asia/Shanghai"), slot, todayDim, categoryId || null,
+          refCategoryIds ? JSON.stringify(refCategoryIds) : null,
+          todayDim, addon || null,
           drafts[0], drafts[1], drafts[2],
           ctx.env.MINIMAX_MODEL || "MiniMax-M3",
           Date.now()

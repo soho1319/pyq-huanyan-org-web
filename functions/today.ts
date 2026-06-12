@@ -791,6 +791,28 @@ ${themeCssVar(theme)}
       </ul>
     </section>
   </main>
+
+  <!-- D55-19: AI 草稿参考资料选择弹窗 -->
+  <div id="aiRefModal" class="ai-ref-modal" style="display:none;">
+    <div class="ai-ref-modal-bg"></div>
+    <div class="ai-ref-modal-card">
+      <div class="ai-ref-modal-head">
+        <h3>📚 选 AI 参考的文案方向</h3>
+        <button type="button" id="aiRefClose" class="ai-ref-close">✕</button>
+      </div>
+      <p class="muted" style="margin:0 0 12px;font-size:12px;">勾选要让 AI 参考的小类（最多 12 个）。已选 <span id="aiRefCount">0</span>/12 · <button type="button" id="aiRefAllOff" style="background:none;border:none;color:#553c9a;cursor:pointer;padding:0;font-size:12px;">清空</button></p>
+      <div class="ai-ref-dim-tabs" id="aiRefDimTabs">
+        ${DIM_IDS.map(d => `<button type="button" class="ai-ref-dim-tab" data-dim="${d}">${d} ${DIMS.find(x => x.id === d)?.name || ''}</button>`).join('')}
+      </div>
+      <div class="ai-ref-body" id="aiRefBody">
+        <p class="muted" style="padding:20px;text-align:center;">加载中...</p>
+      </div>
+      <div class="ai-ref-foot">
+        <button type="button" id="aiRefCancel" class="btn-muted">取消</button>
+        <button type="button" id="aiRefConfirm" class="btn-primary">🤖 用勾选的小类生成</button>
+      </div>
+    </div>
+  </div>
   <script>
     // D55-17 F: multi-add 用 fetch + JSON 提交，错误友好提示
     document.querySelectorAll('form.multi-add-form').forEach(f => {
@@ -836,13 +858,143 @@ ${themeCssVar(theme)}
       })
     })
 
+    // D55-19: AI 草稿参考 categories 选择弹窗
+    let __aiRefDimsData = null  // 缓存已加载的 categories
+    let __aiRefActiveDim = null
+    function openAiRefModal(currentDim, currentSlot) {
+      return new Promise(async (resolve) => {
+        const modal = document.getElementById('aiRefModal')
+        if (!modal) { resolve(null); return }
+        modal.style.display = 'flex'
+        const body = document.getElementById('aiRefBody')
+        const tabsEl = document.getElementById('aiRefDimTabs')
+        const countEl = document.getElementById('aiRefCount')
+        const selected = new Set()
+
+        function updateCount() {
+          if (countEl) countEl.textContent = String(selected.size)
+        }
+
+        // 加载一次（缓存）
+        if (!__aiRefDimsData) {
+          body.innerHTML = '<p class="muted" style="padding:20px;text-align:center;">加载 7 维度 categories...</p>'
+          try {
+            const r = await fetch('/api/categories/grouped')
+            const data = await r.json()
+            if (!data.ok) throw new Error(data.error || '加载失败')
+            __aiRefDimsData = data.dims
+          } catch (err) {
+            body.innerHTML = '<p class="muted" style="color:#c53030;padding:20px;text-align:center;">加载失败：' + err.message + '</p>'
+            return
+          }
+        }
+
+        function renderDimTabContent(dimId) {
+          __aiRefActiveDim = dimId
+          // 高亮 tab
+          tabsEl.querySelectorAll('.ai-ref-dim-tab').forEach(t => t.classList.toggle('active', t.dataset.dim === dimId))
+          const dim = __aiRefDimsData.find(d => d.id === dimId)
+          if (!dim) { body.innerHTML = '<p class="muted">空</p>'; return }
+          body.innerHTML = dim.categories.map(function(cat) {
+            const inner = cat.subcategories.map(function(sub) {
+              const desc = sub.description ? '<div class="ai-ref-sub-desc">' + escapeHtml(sub.description) + (sub.ai_prompt_focus ? ' · 重点：' + escapeHtml(sub.ai_prompt_focus) : '') + '</div>' : ''
+              const checked = selected.has(sub.id) ? 'checked' : ''
+              const cls = selected.has(sub.id) ? 'ai-ref-sub checked' : 'ai-ref-sub'
+              return '<label class="' + cls + '" data-id="' + sub.id + '">' +
+                '<input type="checkbox" ' + checked + ' data-id="' + sub.id + '">' +
+                '<div class="ai-ref-sub-meta">' +
+                  '<div class="ai-ref-sub-name">' + escapeHtml(sub.name) + ' <span class="muted" style="font-size:10px;">' + sub.slot + ' · ' + sub.ai_prompt_id + '</span></div>' +
+                  desc +
+                '</div>' +
+              '</label>'
+            }).join('')
+            return '<div class="ai-ref-cat-group">' +
+              '<div class="ai-ref-cat-name">' + escapeHtml(cat.name) + '</div>' +
+              '<div class="ai-ref-sub-list">' + inner + '</div>' +
+            '</div>'
+          }).join('') || '<p class="muted">（该维度暂无小类）</p>'
+          // 绑定 checkbox 变化
+          body.querySelectorAll('.ai-ref-sub input').forEach(cb => {
+            cb.onchange = (e) => {
+              const id = e.target.dataset.id
+              if (e.target.checked) {
+                if (selected.size >= 12) {
+                  e.target.checked = false
+                  alert('最多勾 12 个小类（避免 prompt 超长）')
+                  return
+                }
+                selected.add(id)
+              } else {
+                selected.delete(id)
+              }
+              // 更新 UI 高亮
+              const lbl = e.target.closest('.ai-ref-sub')
+              if (lbl) lbl.classList.toggle('checked', e.target.checked)
+              updateCount()
+            }
+          })
+        }
+
+        // tab 点击
+        tabsEl.querySelectorAll('.ai-ref-dim-tab').forEach(t => {
+          t.onclick = () => renderDimTabContent(t.dataset.dim)
+        })
+
+        // 默认激活当前 dim，自动预选其下 top1 subcategory（如有）
+        const curDim = __aiRefDimsData.find(d => d.id === currentDim)
+        if (curDim && curDim.categories.length > 0 && curDim.categories[0].subcategories.length > 0) {
+          // 默认勾上当前 dim 的前 2 个小类（用户可取消）
+          curDim.categories.forEach(cat => {
+            cat.subcategories.slice(0, 1).forEach(sub => selected.add(sub.id))
+          })
+        }
+        renderDimTabContent(currentDim)
+        updateCount()
+
+        // 清空按钮
+        const allOffBtn = document.getElementById('aiRefAllOff')
+        if (allOffBtn) {
+          allOffBtn.onclick = () => {
+            selected.clear()
+            body.querySelectorAll('.ai-ref-sub').forEach(l => {
+              l.classList.remove('checked')
+              const cb = l.querySelector('input')
+              if (cb) cb.checked = false
+            })
+            updateCount()
+          }
+        }
+
+        // 关闭
+        const close = (val) => {
+          modal.style.display = 'none'
+          resolve(val)
+        }
+        document.getElementById('aiRefClose').onclick = () => close(null)
+        document.getElementById('aiRefCancel').onclick = () => close(null)
+        modal.querySelector('.ai-ref-modal-bg').onclick = () => close(null)
+        document.getElementById('aiRefConfirm').onclick = () => {
+          if (selected.size === 0) {
+            if (!confirm('你还没勾选任何参考小类，要直接生成（不参考具体小类方向）吗？')) return
+            close([])
+          } else {
+            close(Array.from(selected))
+          }
+        }
+      })
+    }
+
     // D29: per-slot AI 帮写
     document.querySelectorAll('.btn-ai-slot').forEach(btn => {
       btn.onclick = async () => {
         const slot = btn.dataset.slot
+        const todayDim = btn.dataset.dim
         const todayType = btn.dataset.type
         const addon = btn.dataset.addon || ''
         const subtheme = btn.dataset.subtheme || ''
+        // D55-19: 先弹"选参考"弹窗，用户勾选后再调 /api/ai/draft
+        const selectedIds = await openAiRefModal(todayDim, slot)
+        if (!selectedIds) return  // 用户取消
         const status = document.getElementById('aiStatus_' + slot)
         const draftsBox = document.getElementById('aiDrafts_' + slot)
         btn.disabled = true
@@ -855,13 +1007,13 @@ ${themeCssVar(theme)}
           const resp = await fetch('/api/ai/draft', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ todayType, addon, slot, subtheme }),
+            body: JSON.stringify({ todayDim, todayType, addon, slot, subtheme, ref_category_ids: selectedIds }),
           })
           const data = await resp.json()
           if (!data.ok || !data.drafts || data.drafts.length === 0) {
             throw new Error(data.error || '生成失败：返回为空')
           }
-          if (status) status.textContent = '✓ ' + data.drafts.length + ' 条候选已生成'
+          if (status) status.textContent = '✓ ' + data.drafts.length + ' 条候选已生成（参考 ' + selectedIds.length + ' 个小类）'
           renderDrafts(slot, data.drafts, data.draft_id)
         } catch (err) {
           if (status) status.textContent = '✗ 出错：' + err.message
@@ -1409,6 +1561,30 @@ main { max-width: 760px; margin: 0 auto; padding: 20px; }
 }
 .btn-ai:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(var(--ts-rgb), 0.4); }
 .btn-ai:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+/* D55-19: AI 参考选择弹窗 */
+.ai-ref-modal { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.ai-ref-modal-bg { position: absolute; inset: 0; background: rgba(0,0,0,0.45); }
+.ai-ref-modal-card { position: relative; background: #fff; border-radius: 12px; max-width: 720px; width: 92%; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+.ai-ref-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #e2e8f0; }
+.ai-ref-modal-head h3 { margin: 0; font-size: 16px; color: #553c9a; }
+.ai-ref-close { background: none; border: none; font-size: 20px; color: #a0aec0; cursor: pointer; padding: 4px 8px; }
+.ai-ref-dim-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 20px 0; }
+.ai-ref-dim-tab { padding: 5px 12px; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 14px; font-size: 12px; color: #4a5568; cursor: pointer; }
+.ai-ref-dim-tab:hover { background: #edf2f7; }
+.ai-ref-dim-tab.active { background: #553c9a; color: #fff; border-color: #553c9a; font-weight: 600; }
+.ai-ref-body { flex: 1; overflow-y: auto; padding: 12px 20px; }
+.ai-ref-cat-group { margin-bottom: 14px; }
+.ai-ref-cat-name { font-size: 13px; color: #553c9a; font-weight: 600; margin-bottom: 4px; }
+.ai-ref-sub-list { display: flex; flex-direction: column; gap: 4px; }
+.ai-ref-sub { display: flex; align-items: flex-start; gap: 6px; padding: 5px 8px; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.ai-ref-sub:hover { background: #edf2f7; }
+.ai-ref-sub.checked { background: #f0e8ff; border-color: #553c9a; }
+.ai-ref-sub input { margin-top: 2px; }
+.ai-ref-sub-meta { flex: 1; }
+.ai-ref-sub-name { font-weight: 500; color: #2d3748; }
+.ai-ref-sub-desc { color: #718096; font-size: 11px; margin-top: 1px; }
+.ai-ref-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid #e2e8f0; background: #f7fafc; border-radius: 0 0 12px 12px; }
 .ai-drafts { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .draft-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .draft-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
